@@ -1,8 +1,8 @@
 # ShiftSense
 
-**A screen-aware AI sidebar for Windows.**
+**A screen aware AI sidebar for Windows.**
 
-Double-tap **Shift** anywhere on your PC, ask a question, and ShiftSense answers using the app on your screen, your local markdown memory, and the AI provider you choose. It stays lightweight in the system tray, opens without stealing focus, and closes with **Esc**.
+Double tap **Shift** anywhere on your PC, ask a question, and ShiftSense answers using the app on your screen, your local markdown memory, and the AI provider you choose. It stays lightweight in the system tray, opens without stealing focus, and closes with **Esc**.
 
 [![Release](https://img.shields.io/github/v/release/anilkumara9/shiftsense)](https://github.com/anilkumara9/shiftsense/releases)
 [![CI](https://github.com/anilkumara9/shiftsense/actions/workflows/ci.yml/badge.svg)](https://github.com/anilkumara9/shiftsense/actions/workflows/ci.yml)
@@ -14,20 +14,20 @@ Double-tap **Shift** anywhere on your PC, ask a question, and ShiftSense answers
 
 ## Overview
 
-ShiftSense is built for quick questions while you work. Instead of switching to a browser tab and re-explaining what you are looking at, you open the sidebar, ask naturally, and get an answer grounded in the current window.
+ShiftSense is built for quick questions while you work. Instead of switching to a browser tab and explaining again what you are looking at, you open the sidebar, ask naturally, and get an answer grounded in the current window.
 
-It reads the screen through Windows UI Automation first, uses a screenshot only when the accessible text is not enough, and keeps your long-term memory as plain markdown files that you can open, edit, back up, or delete at any time.
+It reads the screen through Windows UI Automation first, uses a screenshot only when the accessible text is not enough, and keeps your long term memory as plain markdown files that you can open, edit, back up, or delete at any time.
 
 ## Why ShiftSense
 
 **Because the answer should come to where you already are.** Normally, getting AI help with something on your screen means switching apps, taking a screenshot or copying text, pasting it into a chat tab, and explaining the background before you can even ask. ShiftSense removes all of that:
 
-- **No re-explaining.** It already sees the window you are asking about and knows your context from your memory files, so you can ask the way you would ask a person sitting next to you.
+- **No need to explain everything again.** It already sees the window you are asking about and knows your context from your memory files, so you can ask the way you would ask a person sitting next to you.
 - **No copy and paste.** Errors, emails, documents, dashboards: ask about them in place, in any app, without moving content around.
 - **It remembers you.** Your memory lives in plain markdown files on your PC and your chats persist between sessions, so answers stay personal instead of starting from zero every time.
 - **Your model, your cost.** Use Claude, OpenAI, or a free local model through Ollama. You see token and cost stats per chat, and a daily budget cap protects you from surprises. There is no ShiftSense subscription.
 - **Private by design.** Memory and history never leave your machine. Password fields are never read, sensitive apps can be blocked from reading entirely, and with Ollama nothing leaves your PC at all.
-- **Help that acts, with your permission.** When a task needs the computer itself, ShiftSense asks first, every time. Approvals expire in 2 minutes and there is no always-allow switch.
+- **Help that acts, with your permission.** When a task needs the computer itself, ShiftSense asks first, every time. Approvals expire in 2 minutes and there is no always allow switch.
 - **Free and open source.** Download it, inspect it, keep it forever.
 
 ## Where it helps
@@ -44,31 +44,31 @@ It reads the screen through Windows UI Automation first, uses a screenshot only 
 
 ### Sidebar experience
 
-- Double-tap **Shift** to open the sidebar from anywhere.
+- Double tap **Shift** to open the sidebar from anywhere.
 - Translucent floating panel that appears over your current app.
 - Does not steal focus while peeking; click into the composer when you want to type.
 - **Esc** closes the sidebar.
 - Fallback shortcut: **Ctrl+Shift+Space**.
 - Multiple chat tabs with persistent history.
-- Per-tab token, cache, context and estimated cost stats.
+- Token, cache, context and estimated cost stats for each tab.
 - System tray controls for showing/hiding the app, opening memory, changing provider, and updating settings.
 
 ### Screen understanding
 
-- Accessibility-first context using Windows UI Automation.
+- Context is accessibility first, read through Windows UI Automation.
 - Reads the foreground app window, focused element, selected text, controls, labels and visible text.
 - Hard caps keep screen context fast and predictable.
 - Screenshot fallback is limited and used only when the UI Automation tree is missing, too thin, or the model explicitly needs visual context.
 - Password values are never read.
-- Sensitive apps can be placed on a no-read list.
+- Sensitive apps can be placed on a no read list.
 
 ### Local memory
 
 - Memory is stored as normal markdown files.
 - Default location: `~/DShift/memory/`.
 - Includes `me.md`, `notes.md`, `people/` and `projects/`.
-- Ranked in-app memory search.
-- Model memory writes are audit-logged and undoable.
+- Ranked memory search inside the app.
+- Model memory writes are audit logged, and you can undo them.
 - You can edit every memory file in any text editor.
 
 ### Providers and cost control
@@ -76,25 +76,25 @@ It reads the screen through Windows UI Automation first, uses a screenshot only 
 - Anthropic Claude models.
 - OpenAI models.
 - Ollama for local models and offline chat.
-- Per-tab model selection.
+- Model choice for each tab.
 - Editable pricing table.
 - Daily budget tracking with reserve/settle protection for concurrent tabs.
-- Streaming safeguards: retry handling, stall watchdog and a per-turn time budget.
+- Streaming safeguards: retry handling, stall watchdog and a time budget for each turn.
 
-### Optional computer-use handoff
+### Optional computer use handoff
 
 - Optional Codex CLI handoff for approved tasks.
 - Every task requires explicit approval.
 - Approvals expire after 2 minutes.
-- No persistent always-allow mode.
+- No persistent always allow mode.
 - Tasks run with a scrubbed environment and an audit trail.
 
 ### Reliability and safety
 
-- Crash-safe local state using atomic writes, backups and mirror recovery.
-- Tamper-evident, hash-chained audit logs for memory writes and Codex tasks.
-- Settings validation and encrypted in-app API key storage using Windows DPAPI.
-- Test suite covers the agent loop, memory, approvals, screen context, security rules, persistence, provider streaming and end-to-end failure cases.
+- Local state is crash safe, thanks to atomic writes, backups and mirror recovery.
+- Audit logs for memory writes and Codex tasks are tamper evident and hash chained.
+- Settings validation and encrypted API key storage in the app, using Windows DPAPI.
+- Test suite covers the agent loop, memory, approvals, screen context, security rules, persistence, provider streaming and end to end failure cases.
 
 ---
 
@@ -111,9 +111,9 @@ It reads the screen through Windows UI Automation first, uses a screenshot only 
 
 3. Run the installer.
 4. Launch ShiftSense from the Start menu or system tray.
-5. Double-tap **Shift** to open the sidebar.
+5. Double tap **Shift** to open the sidebar.
 
-> The installer is not code-signed yet. If Windows SmartScreen appears, confirm that you downloaded the file from the official GitHub release page, then choose **More info → Run anyway** if you trust the source.
+> The installer is not code signed yet. If Windows SmartScreen appears, confirm that you downloaded the file from the official GitHub release page, then choose **More info → Run anyway** if you trust the source.
 
 #### Verify your download (recommended)
 
@@ -139,7 +139,7 @@ Use this option for development or if you want to inspect and modify the code be
 | npm | Included with Node.js. |
 | Git | Required only for cloning the repository. |
 | An AI provider | Anthropic key, OpenAI key, or Ollama installed locally. |
-| Codex CLI | Optional. Required only for the approval-gated computer-use handoff. |
+| Codex CLI | Optional. Only needed for computer use through the Codex handoff, which asks for your approval first. |
 
 #### Clone and start
 
@@ -150,7 +150,7 @@ npm install
 npm start
 ```
 
-On first launch, look for the ShiftSense tray icon. Double-tap **Shift** or press **Ctrl+Shift+Space** to open the sidebar.
+On first launch, look for the ShiftSense tray icon. Double tap **Shift** or press **Ctrl+Shift+Space** to open the sidebar.
 
 ---
 
@@ -165,19 +165,19 @@ ShiftSense checks for provider keys in this order:
 1. Real environment variables.
 2. `./.env` in the project folder.
 3. `~/.config/dshift/.env`.
-4. The encrypted in-app key saved from Settings.
+4. The encrypted key stored in the app, saved from Settings.
 
 ### Provider setup
 
 | Provider | What to configure | Notes |
 |---|---|---|
-| Anthropic | `ANTHROPIC_API_KEY` or the in-app Anthropic key field | Default provider. Get a key from the Anthropic Console. |
-| OpenAI | `OPENAI_API_KEY` or the in-app OpenAI key field | Switch the provider in Settings or from the tray menu. |
+| Anthropic | `ANTHROPIC_API_KEY` or the Anthropic key field in the app | Default provider. Get a key from the Anthropic Console. |
+| OpenAI | `OPENAI_API_KEY` or the OpenAI key field in the app | Switch the provider in Settings or from the tray menu. |
 | Ollama | No API key | Install Ollama, pull a model, then switch the provider to Ollama in the app. |
 
 ### Optional `.env` setup
 
-Copy the example file if you prefer file-based configuration:
+Copy the example file if you prefer file based configuration:
 
 ```powershell
 Copy-Item .env.example .env
@@ -192,7 +192,7 @@ ANTHROPIC_API_KEY=sk-ant-...
 # DSHIFT_DATA_DIR=C:\Users\you\Documents\ShiftSense
 ```
 
-Never commit a real `.env` file. The repository ignores it, and the packaging preflight blocks key-like files from being included in builds.
+Never commit a real `.env` file. The repository ignores it, and the packaging preflight blocks files that look like they hold a key from being included in builds.
 
 ### Change the data folder
 
@@ -217,7 +217,7 @@ For an installed build, set the variable in Windows Environment Variables and re
 
 | Action | How |
 |---|---|
-| Open the sidebar | Double-tap **Shift** or press **Ctrl+Shift+Space**. |
+| Open the sidebar | Double tap **Shift** or press **Ctrl+Shift+Space**. |
 | Close the sidebar | Press **Esc**. |
 | Ask about the current app | Open the sidebar and type your question. ShiftSense attaches screen context automatically. |
 | Open a new tab | Use the **+** button or **Ctrl+T**. |
@@ -241,7 +241,7 @@ Useful questions to try:
 
 ## Data, privacy and security
 
-ShiftSense is local-first. Your memory, chat history, settings and audit files stay on your machine unless you send a question to a configured cloud provider.
+ShiftSense is local first. Your memory, chat history, settings and audit files stay on your machine unless you send a question to a configured cloud provider.
 
 ### Local data layout
 
@@ -267,14 +267,14 @@ ShiftSense is local-first. Your memory, chat history, settings and audit files s
 
 When you ask a question using Anthropic or OpenAI, ShiftSense sends the prompt, the relevant screen context, the `me.md` memory excerpt and the memory file list to that provider. If a screenshot is needed, that screenshot is also sent for that question.
 
-When you use Ollama, chat runs against your local model. Screen text stays on your machine in that mode unless you separately choose a cloud-backed tool or provider.
+When you use Ollama, chat runs against your local model. Screen text stays on your machine in that mode unless you separately choose a cloud backed tool or provider.
 
-### Built-in protections
+### Protections built in
 
 - Password fields are redacted and never emitted as values.
-- Apps on the no-read list are not read.
+- Apps on the no read list are not read.
 - Memory writes are confined to the memory folder.
-- Memory writes are size-capped, audit-logged and undoable.
+- Memory writes are size capped, audit logged and undoable.
 - Codex tasks require approval and receive a scrubbed environment without provider API keys.
 - API keys saved in the app are encrypted with Windows DPAPI.
 - Local state files use atomic writes with backup and mirror recovery.
@@ -290,9 +290,9 @@ For vulnerability reporting and the security model, see [SECURITY.md](SECURITY.m
 | Command | Purpose |
 |---|---|
 | `npm start` | Run the app in development. |
-| `npm run check` | Syntax-check the main process, preload, renderer, source and scripts. |
+| `npm run check` | Syntax check the main process, preload, renderer, source and scripts. |
 | `npm test` | Run the full test suite. |
-| `npm run stress` | Run the heavy-load stress suite. |
+| `npm run stress` | Run the heavy load stress suite. |
 | `npm run preflight` | Run packaging safety and completeness checks. |
 | `npm run icon` | Regenerate the app icons. |
 | `npm run shot` | Capture a local UI screenshot for development checks. |
@@ -308,19 +308,19 @@ For vulnerability reporting and the security model, see [SECURITY.md](SECURITY.m
 ├── src/                    Tested application core
 │   ├── agent.js            Tool loop and turn orchestration
 │   ├── approvalQueue.js    Serialized user approvals
-│   ├── chatStore.js        Tabs, transcripts, archive and crash-safe persistence
-│   ├── codex.js            Approval-gated Codex handoff
+│   ├── chatStore.js        Tabs, transcripts, archive and crash safe persistence
+│   ├── codex.js            Approval gated Codex handoff
 │   ├── contextEngine.js    UI Automation tree serialization and safety caps
-│   ├── doubleShift.js      Double-tap Shift detection state machine
+│   ├── doubleShift.js      Double tap Shift detection state machine
 │   ├── llm.js              Anthropic, OpenAI and Ollama streaming clients
 │   ├── memory.js           Markdown memory store, search, audit chain and undo
 │   ├── settings.js         Settings validation and API key resolution
-│   ├── shellPolicy.js      Defence-in-depth shell policy
+│   ├── shellPolicy.js      Defence in depth shell policy
 │   ├── spend.js            Daily budget ledger
 │   ├── uiaClient.js        Persistent UI Automation host client
 │   └── usage.js            Token, cache and cost accounting
 ├── native/                 PowerShell UI Automation readers for Windows
-├── tests/                  Unit, security, reliability and end-to-end tests
+├── tests/                  Unit, security, reliability and end to end tests
 ├── scripts/                Check, test, stress, preflight, icon and screenshot tools
 ├── docs/                   Architecture, memory and tool documentation
 ├── build/                  Application icons
@@ -375,7 +375,7 @@ Releases are built by GitHub Actions on a Windows runner. Pushing a version tag 
 
 - Make sure the target app is the foreground window before opening ShiftSense.
 - Some apps expose very little UI Automation text; ShiftSense may need the screenshot fallback.
-- Check whether the app is on the no-read list in Settings.
+- Check whether the app is on the no read list in Settings.
 - Password managers and protected windows may intentionally expose no readable content.
 
 ### Ollama does not respond
@@ -388,7 +388,7 @@ Releases are built by GitHub Actions on a Windows runner. Pushing a version tag 
 
 - Install the Codex CLI separately.
 - Make sure it is available from a normal absolute install location or PATH entry.
-- Remember that each computer-use task still needs your approval inside ShiftSense.
+- Remember that each computer use task still needs your approval inside ShiftSense.
 
 ### The installer shows a SmartScreen warning
 
@@ -398,7 +398,7 @@ The current installer is unsigned. Only continue if the file came from the offic
 
 ## Contributing
 
-Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request, and keep the project rules intact: approvals must always resolve, screen context must never read the sidebar itself, memory writes must stay inside the memory folder, persisted state must be crash-safe, and placeholder/demo features do not ship.
+Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request, and keep the project rules intact: approvals must always resolve, screen context must never read the sidebar itself, memory writes must stay inside the memory folder, persisted state must be crash safe, and placeholder/demo features do not ship.
 
 ## License
 

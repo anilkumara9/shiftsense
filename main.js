@@ -150,7 +150,7 @@ function registerEsc() {
   if (hookStatus.doubleShift) return;
   try {
     const ok = globalShortcut.register('Escape', () => { if (winAlive() && win.isVisible()) hideSidebar(); });
-    if (!ok) console.warn('[dshift] Escape registration failed (another app owns it); use the ✕ button or double-Shift to close');
+    if (!ok) console.warn('[dshift] Escape registration failed (another app owns it); use the ✕ button or double Shift to close');
   } catch { /* already registered */ }
 }
 
@@ -170,9 +170,9 @@ function startShiftHook() {
     uIOhook.on('keyup', e => { if (SHIFT.has(e.keycode)) detector.feed({ type: 'shiftUp', time: Date.now() }); });
     uIOhook.start();
     uiohookRef = uIOhook;
-    hookStatus = { doubleShift: true, detail: 'double-Shift hook active' };
+    hookStatus = { doubleShift: true, detail: 'Double Shift hook active' };
   } catch (e) {
-    hookStatus = { doubleShift: false, detail: `double-Shift unavailable (${e.message}); fallback shortcut active` };
+    hookStatus = { doubleShift: false, detail: `Double Shift unavailable (${e.message}); fallback shortcut active` };
     console.warn('[dshift]', hookStatus.detail);
   }
   globalShortcut.register(settings.fallbackShortcut || 'CommandOrControl+Shift+Space', () => toggleSidebar());
@@ -381,7 +381,7 @@ function createTray() {
   const iconPath = path.join(__dirname, 'renderer', 'icon.png');
   const icon = fs.existsSync(iconPath) ? nativeImage.createFromPath(iconPath) : nativeImage.createEmpty();
   tray = new Tray(icon);
-  tray.setToolTip('D Shift — double-tap Shift');
+  tray.setToolTip('D Shift: double tap Shift to open');
   refreshTrayMenu();
   tray.on('click', () => toggleSidebar());
 }

@@ -45,7 +45,7 @@
     "npmRebuild": false
   },
   "dependencies": {},
-  "description": "D Shift \u2014 a screen-aware AI sidebar for Windows. Double-tap Shift anywhere, ask about what's on your screen. Accessibility-first context, local markdown memory, approval-gated Codex handoff.",
+  "description": "D Shift is a screen aware AI sidebar for Windows. Double tap Shift anywhere and ask about what is on your screen. Accessibility first context, local markdown memory, and approval gated Codex handoff.",
   "devDependencies": {
     "electron": "^33.0.0",
     "electron-builder": "^25.0.0"
@@ -68,5 +68,5 @@
     "stress": "node scripts/stress.js",
     "smoke": "node scripts/quit-smoke.js"
   },
-  "version": "1.5.1"
+  "version": "1.6.0"
 }

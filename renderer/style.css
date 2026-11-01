@@ -17,12 +17,24 @@ button.prominent:disabled{opacity:.4;cursor:default}
 .iconbtn{width:22px;height:22px;font-size:11px;color:var(--secondary);border-radius:6px;display:inline-flex;align-items:center;justify-content:center;flex:none}
 .iconbtn:hover{background:rgba(255,255,255,.07);color:var(--txt)}
 input,select,textarea{font:inherit;color:var(--txt);background:var(--surface);border:1px solid var(--stroke);border-radius:8px;padding:6px 8px;outline:none}
+input:focus,select:focus,textarea:focus{border-color:rgba(10,132,255,.6);box-shadow:0 0 0 3px rgba(10,132,255,.16)}
+button:focus-visible,.tab:focus-visible{outline:2px solid rgba(10,132,255,.75);outline-offset:1px}
 a{color:var(--accent);text-decoration:none}
+
+/* Thin, theme matched scrollbars for every scrollable pane (the Chromium
+   default is chunky light grey — very visible in the dark panel and in
+   code blocks). The tab strip keeps its hidden scrollbar by design. */
+#transcript::-webkit-scrollbar,.popover::-webkit-scrollbar,#memFiles::-webkit-scrollbar,.codeblock::-webkit-scrollbar,#attachRow::-webkit-scrollbar,.tooldetail pre::-webkit-scrollbar{width:8px;height:8px}
+#transcript::-webkit-scrollbar-thumb,.popover::-webkit-scrollbar-thumb,#memFiles::-webkit-scrollbar-thumb,.codeblock::-webkit-scrollbar-thumb,#attachRow::-webkit-scrollbar-thumb,.tooldetail pre::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14);border-radius:999px;border:2px solid transparent;background-clip:content-box}
+#transcript::-webkit-scrollbar-thumb:hover,.popover::-webkit-scrollbar-thumb:hover,#memFiles::-webkit-scrollbar-thumb:hover,.codeblock::-webkit-scrollbar-thumb:hover,#attachRow::-webkit-scrollbar-thumb:hover,.tooldetail pre::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.26);border:2px solid transparent;background-clip:content-box}
+#transcript::-webkit-scrollbar-track,.popover::-webkit-scrollbar-track,#memFiles::-webkit-scrollbar-track,.codeblock::-webkit-scrollbar-track,#attachRow::-webkit-scrollbar-track,.tooldetail pre::-webkit-scrollbar-track{background:transparent}
+#transcript::-webkit-scrollbar-corner,.popover::-webkit-scrollbar-corner,#memFiles::-webkit-scrollbar-corner,.codeblock::-webkit-scrollbar-corner,#attachRow::-webkit-scrollbar-corner,.tooldetail pre::-webkit-scrollbar-corner{background:transparent}
 
 /* TabStrip */
 #tabstrip{display:flex;align-items:center;gap:6px;padding:10px 10px 0}
-#tabs{display:flex;gap:4px;overflow-x:auto;flex:1;scrollbar-width:none}#tabs::-webkit-scrollbar{display:none}
-.tab{display:flex;align-items:center;gap:5px;padding:5px 9px;border-radius:8px;color:var(--secondary);cursor:pointer;white-space:nowrap;font-size:11px;max-width:170px}
+#tabstrip .iconbtn{flex:none}
+#tabs{display:flex;gap:4px;overflow-x:auto;flex:1;min-width:0;scroll-behavior:smooth;scrollbar-width:none;-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 22px),transparent);mask-image:linear-gradient(90deg,#000 calc(100% - 22px),transparent)}#tabs::-webkit-scrollbar{display:none}
+.tab{display:flex;align-items:center;gap:5px;padding:5px 9px;border-radius:8px;color:var(--secondary);cursor:pointer;white-space:nowrap;font-size:11px;max-width:170px;flex:none}
 .tab.sel{background:rgba(255,255,255,.13);color:var(--txt);font-weight:600}
 .tab:hover:not(.sel){background:rgba(255,255,255,.07)}
 .tab .tt{overflow:hidden;text-overflow:ellipsis;max-width:120px}
@@ -55,11 +67,11 @@ a{color:var(--accent);text-decoration:none}
 .fadeup{animation:fadeUp .38s var(--fadeup)}
 .empty{font-size:13px;padding-top:4px;display:flex;flex-direction:column;gap:6px}
 .empty .sub{font-size:11px;color:var(--secondary)}
-.msg-user{align-self:flex-end;max-width:calc(100% - 40px);margin-left:40px;display:flex;flex-direction:column;align-items:flex-end;gap:6px}
-.msg-user .bubble{background:var(--userbubble);color:#fff;font-size:13px;padding:7px 11px;border-radius:12px;white-space:pre-wrap;word-wrap:break-word;text-align:left}
+.msg-user{align-self:flex-end;max-width:calc(100% - 40px);margin-left:40px;display:flex;flex-direction:column;align-items:flex-end;gap:6px;min-width:0}
+.msg-user .bubble{background:var(--userbubble);color:#fff;font-size:13px;padding:7px 11px;border-radius:12px;white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere;max-width:100%;min-width:0}
 .msg-user .atts{display:flex;gap:6px}.msg-user .atts img{width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid var(--stroke)}
-.msg-asst{align-self:stretch;display:flex;flex-direction:column;gap:4px}
-.msg-asst .card{background:var(--surface);border:1px solid var(--stroke);border-radius:12px;padding:8px 11px;font-size:13px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word}
+.msg-asst{align-self:stretch;display:flex;flex-direction:column;gap:4px;min-width:0}
+.msg-asst .card{background:var(--surface);border:1px solid var(--stroke);border-radius:12px;padding:8px 11px;font-size:13px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere;min-width:0}
 .msg-asst .card code{background:rgba(255,255,255,.12);border-radius:4px;padding:0 3px;font-family:Consolas,monospace;font-size:12px}
 .msg-asst .card a{color:var(--accent)}
 .codeblock{background:rgba(0,0,0,.3);border-radius:8px;padding:10px;font-family:Consolas,monospace;font-size:11.5px;overflow-x:auto;white-space:pre;margin:4px 0}
@@ -103,6 +115,8 @@ a{color:var(--accent);text-decoration:none}
 .pill.green{color:#30d158;background:rgba(48,209,88,.15)}.pill.red{color:#ff6b61;background:rgba(255,69,58,.15)}.pill.gray{color:#c7c7cc;background:rgba(142,142,147,.18)}
 .tasksteps{margin:0 10px 10px 20px;padding-left:12px;border-left:1px solid var(--stroke);display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--secondary)}
 .stopbtn{width:24px;height:24px;border-radius:50%;background:rgba(255,255,255,.12);font-size:9px}
+.stopbtn:hover{background:rgba(255,255,255,.22)}
+.chip:hover{border-color:rgba(255,255,255,.22)}
 .approval{background:var(--surface);border:1px solid rgba(255,159,10,.35);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:8px}
 .approval .at{font-size:13px;font-weight:500;display:flex;justify-content:space-between;gap:8px}
 .approval .ad{font-size:12px;color:var(--secondary);max-height:110px;overflow:hidden}
@@ -129,11 +143,15 @@ a{color:var(--accent);text-decoration:none}
 #inputCard.droptarget{border-color:var(--accent)}#inputCard.auto{border-color:rgba(255,159,10,.5)}
 #fieldRow{display:flex;gap:8px;align-items:flex-end}
 #input{flex:1;background:none;border:none;resize:none;max-height:110px;font-size:13px;padding:2px}
+#input:focus{border:none;box-shadow:none}
+#inputCard:focus-within{border-color:rgba(10,132,255,.55);box-shadow:0 0 0 3px rgba(10,132,255,.14)}
 #input::placeholder{color:var(--tertiary)}
 #sendControls{display:inline-flex;gap:6px;align-items:center}
 .roundbtn{width:24px;height:24px;border-radius:50%;background:rgba(255,255,255,.12);color:#fff;font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex:none}
-.roundbtn.accent{background:var(--accent)}.roundbtn.stop{background:rgba(255,255,255,.18)}
+.roundbtn:hover{background:rgba(255,255,255,.22)}
+.roundbtn.accent{background:var(--accent)}.roundbtn.accent:hover{background:#2b93ff}.roundbtn.stop{background:rgba(255,255,255,.18)}
 .pillbtn{height:24px;padding:0 8px;border-radius:999px;background:rgba(255,255,255,.1);font-size:11px;font-weight:500}
+.pillbtn:hover{background:rgba(255,255,255,.17)}
 #attachRow{display:flex;gap:6px;overflow-x:auto}
 .attchip{position:relative;flex:none}
 .attchip img{width:48px;height:48px;object-fit:cover;border-radius:6px;border:1px solid var(--stroke)}
@@ -166,5 +184,5 @@ a{color:var(--accent);text-decoration:none}
 .histrow .trash{margin-left:auto;display:none}.histrow:hover .trash{display:block}
 #fbShot{height:80px;border-radius:8px}
 .memwrap{display:flex;gap:12px}#memFiles{list-style:none;margin:0;padding:0;min-width:130px;font-size:12px;max-height:300px;overflow:auto}
-#memFiles li{padding:4px 6px;border-radius:6px;cursor:pointer;color:var(--secondary)}#memFiles li.sel{background:rgba(255,255,255,.08);color:var(--txt)}
+#memFiles li{padding:4px 6px;border-radius:6px;cursor:pointer;color:var(--secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:230px}#memFiles li.sel{background:rgba(255,255,255,.08);color:var(--txt)}
 .memedit{flex:1;display:flex;flex-direction:column;gap:8px}.memedit textarea{font-family:Consolas,monospace;font-size:12px}

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.6.0 — Humanized content, new icon, UI polish, friendly errors (2026-11-02)
+
+A user experience release: nothing about how the app works changed shape, but everything a person reads, sees, or clicks got a careful pass.
+
+- **Friendly first run errors.** The failures a new user actually hits now explain themselves in one clear sentence with the fix: no API key configured (caught before any request is sent), Ollama not running (with how to start it), a rejected API key (with where to fix it), a model that does not exist (with the exact `ollama pull` command when relevant), no network, rate limits, and connections dropping mid answer. The raw technical detail is still attached for logs. 12 new tests pin every message; the suite is now 111 tests.
+- **New icon.** The mark is now a blue keycap in the product accent with a bold white Shift arrow, and the system tray and window finally show the real icon: they were still using a 157 byte placeholder while the proper icon only existed in the installer.
+- **UI polish.** A long unbroken word or link could blow a message bubble out to over 2,000 px wide and clip the conversation; bubbles now wrap and stay inside the panel. The tab strip scrolls predictably with pinned action buttons and a subtle scroll hint, scrollbars are thin and theme matched, and keyboard focus is visible for the first time (composer ring, focus outlines).
+- **Humanized writing everywhere.** The README, the docs, CONTRIBUTING, SECURITY, the .env template, the app description, and the in app strings were rewritten in plain warm language, with mid word dashes removed throughout. Facts, commands, and links are unchanged.
+
 ## 1.5.1 — Close-crash fix + environment hardening (2026-11-02)
 
 Fixes the crash a real user hit on Windows within minutes of installing v1.5.0, plus the whole class of related issues found by auditing every timer, send, and shutdown path in the main process.

@@ -132,8 +132,85 @@ async function httpError(provider, res) {
   return e;
 }
 
+// ---------- user-facing error translation ----------
+// The stream functions are the last code that touches a provider failure
+// before runTurn rethrows it and the UI shows err.message verbatim. Raw
+// failures are cryptic for a first-time user ("fetch failed", a bare 401
+// JSON body, an empty key silently sent to the API). friendlyError maps
+// the FINAL error of a call (retries already exhausted inside
+// runWithRetries — retry decisions always see the raw error) to one clear,
+// actionable sentence per provider. The original error is never lost: it
+// is kept on .cause, its detail is appended in parentheses, and .status /
+// .code are preserved for callers and the crash log.
+const PROVIDER_NAMES = { anthropic: 'Anthropic', openai: 'OpenAI', ollama: 'Ollama' };
+function missingKeyError(provider) {
+  const name = PROVIDER_NAMES[provider] || 'The provider';
+  const e = new Error(`No ${name} API key is configured yet. Add your ${name} key in Settings, then send your message again.`);
+  e.code = 'EMISSINGKEY';
+  e.friendly = true;
+  return e;
+}
+/** Walk err + its .cause chain (undici nests the system error under
+ *  "fetch failed") for the first error code and a printable detail trail. */
+function transportInfo(err) {
+  let code = null; const parts = [];
+  let cur = err;
+  for (let depth = 0; cur && depth < 5; depth++) {
+    if (!code && cur.code) code = cur.code;
+    const m = cur.message || String(cur);
+    if (m && !parts.includes(m)) parts.push(m);
+    cur = cur.cause;
+  }
+  return { code, detail: parts.join(': ') };
+}
+const TRANSPORT_CODES = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ECONNRESET', 'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_SOCKET', 'UND_ERR_BODY_TIMEOUT', 'CERT_HAS_EXPIRED', 'DEPTH_ZERO_SELF_SIGNED_CERT', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'ERR_TLS_CERT_ALTNAME_INVALID']);
+function friendlyError(err, { provider = 'anthropic', model = '', partial = false } = {}) {
+  if (!err || typeof err !== 'object' || err.friendly) return err;
+  if (err.code === 'ESTREAMSTALL' || err.code === 'EMISSINGKEY') return err; // already written for users
+  if (err.name === 'AbortError' || err.code === 'ABORT_ERR') return err; // the user's own Stop — not a failure to explain
+  const name = PROVIDER_NAMES[provider] || 'The provider';
+  const { code, detail } = transportInfo(err);
+  const suffix = detail ? ` (${detail})` : '';
+  const wrap = msg => {
+    const e = new Error(msg);
+    e.cause = err;
+    if (typeof err.status === 'number') e.status = err.status;
+    const c = err.code || code;
+    if (c) e.code = c;
+    e.friendly = true;
+    return e;
+  };
+  const status = err.status;
+  if (typeof status === 'number') {
+    if (status === 401 || status === 403) return wrap(`Your ${name} API key was rejected (${status}). Open Settings, check the ${name} key, and try again.${suffix}`);
+    if (status === 404) {
+      if (provider === 'ollama') return wrap(`The model "${model}" is not downloaded in Ollama yet. Run "ollama pull ${model}" in a terminal, then send your message again.${suffix}`);
+      return wrap(`The model "${model}" was not found by ${name} (404). It may be misspelled or no longer available — pick a different model for this tab and try again.${suffix}`);
+    }
+    if (status === 429) return wrap(`${name} is rate limiting your requests right now (429), even after retrying. Wait a minute, then send your message again.${suffix}`);
+    if (status === 529) return wrap(`${name} is overloaded right now (529), even after retrying. Wait a moment, then send your message again.${suffix}`);
+    if (status >= 500) return wrap(`${name} is having a problem on its side right now (${status}), even after retrying. Wait a moment, then send your message again.${suffix}`);
+    if (status === 400) return wrap(`${name} rejected this request as invalid.${suffix}`);
+    return wrap(`${name} could not complete this request (${status}).${suffix}`);
+  }
+  // Transport-level failure (no HTTP response at all).
+  const looksTransport = err instanceof TypeError || TRANSPORT_CODES.has(code) || /fetch failed|getaddrinfo|socket|network/i.test(detail);
+  if (!looksTransport) return err; // unrecognized — never mask an unknown error
+  if (provider === 'ollama') {
+    return wrap(partial
+      ? `The connection to Ollama dropped partway through the answer, so it stopped early. Check that Ollama is still running, then send your message again.${suffix}`
+      : `Ollama does not seem to be running on this PC. Start Ollama (open the Ollama app, or run "ollama serve" in a terminal), then send your message again.${suffix}`);
+  }
+  if (partial) return wrap(`The connection to ${name} dropped partway through the answer, so it stopped early. Send your message again to retry.${suffix}`);
+  if (code && /CERT|TLS|SSL/.test(code)) return wrap(`The secure connection to ${name} failed. Check your PC's date and time and your network, then try again.${suffix}`);
+  return wrap(`Could not reach ${name}. Check your internet connection, then send your message again.${suffix}`);
+}
+
 /** Anthropic streaming call. Returns {text, toolUses, usage, stopReason, content}. */
 async function anthropicStream({ apiKey, model, system, messages, tools, effort = 'low', maxTokens = 64000, onText, fetchImpl = fetch, signal, maxAttempts, retryBaseMs, stallMs = STALL_MS, sleepImpl, randImpl }) {
+  // Fail before the request when no key is configured: an empty x-api-key
+  // otherwise earns a confusing provider 401 on the user's very first run.
+  if (!apiKey || !String(apiKey).trim()) throw missingKeyError('anthropic');
   // Cache breakpoints (ephemeral, 5-min TTL): system block + last tool.
   // Cloned — the caller's tool schemas are never mutated.
   const cachedTools = tools && tools.length
@@ -147,8 +224,9 @@ async function anthropicStream({ apiKey, model, system, messages, tools, effort 
     messages, tools: cachedTools,
     ...(effort && effort !== 'low' ? { output_config: { effort } } : {}),
   };
-  return runWithRetries(async state => {
-    const emit = d => { state.emitted = true; if (onText) onText(d); };
+  let emittedAny = false; // error translation needs to know if the user already saw text
+  const run = runWithRetries(async state => {
+    const emit = d => { state.emitted = true; emittedAny = true; if (onText) onText(d); };
     const ctrl = linkSignal(signal);
     const res = await fetchImpl('https://api.anthropic.com/v1/messages', {
       method: 'POST', signal: ctrl.signal,
@@ -196,6 +274,7 @@ async function anthropicStream({ apiKey, model, system, messages, tools, effort 
     }).filter(Boolean);
     return { text, toolUses, usage, stopReason, content };
   }, { signal, maxAttempts, retryBaseMs, sleepImpl, randImpl });
+  return run.catch(e => { throw friendlyError(e, { provider: 'anthropic', model, partial: emittedAny }); });
 }
 /**
  * Anthropic-style transcript -> OpenAI chat format (and back for tool calls).
@@ -234,10 +313,16 @@ const toOpenAITools = tools => (tools || []).map(t => ({ type: 'function', funct
  *  Retry-After honored, 30s stream watchdog). OpenAI prompt caching is
  *  automatic server-side, so there is nothing to mark here. */
 async function openaiStream({ apiKey, baseURL = 'https://api.openai.com/v1', model, system, messages, tools, onText, fetchImpl = fetch, signal, maxAttempts, retryBaseMs, stallMs = STALL_MS, sleepImpl, randImpl }) {
+  // This client serves two very different backends: cloud OpenAI (needs a
+  // key) and local Ollama (needs the app running, never a key). Error
+  // guidance differs completely, so name the provider from the base URL.
+  const provider = /localhost|127\.0\.0\.1|\[::1\]/i.test(baseURL) ? 'ollama' : 'openai';
+  if (provider === 'openai' && (!apiKey || !String(apiKey).trim())) throw missingKeyError('openai');
   const url = `${baseURL.replace(/\/$/, '')}/chat/completions`;
   const payload = JSON.stringify({ model, messages: toOpenAIMessages(system, messages), tools: tools && tools.length ? toOpenAITools(tools) : undefined, stream: true, stream_options: { include_usage: true } });
-  return runWithRetries(async state => {
-    const emit = d => { state.emitted = true; if (onText) onText(d); };
+  let emittedAny = false; // error translation needs to know if the user already saw text
+  const run = runWithRetries(async state => {
+    const emit = d => { state.emitted = true; emittedAny = true; if (onText) onText(d); };
     const ctrl = linkSignal(signal);
     const res = await fetchImpl(url, {
       method: 'POST', signal: ctrl.signal,
@@ -272,5 +357,6 @@ async function openaiStream({ apiKey, baseURL = 'https://api.openai.com/v1', mod
     const toolUses = [...calls.values()].filter(c => c.name).map(c => { let input = {}; try { input = JSON.parse(c.args || '{}'); } catch { /* registry validates */ } return { id: c.id, name: c.name, input }; });
     return { text, toolUses, usage, stopReason: toolUses.length ? 'tool_use' : 'end_turn' };
   }, { signal, maxAttempts, retryBaseMs, sleepImpl, randImpl });
+  return run.catch(e => { throw friendlyError(e, { provider, model, partial: emittedAny }); });
 }
-module.exports = { parseSSE, anthropicStream, openaiStream, toOpenAIMessages, toOpenAITools, resolveModel, isRetryableError, retryDelayMs, parseRetryAfterMs, MAX_ATTEMPTS, STALL_MS, MAX_RETRY_DELAY_MS };
+module.exports = { parseSSE, anthropicStream, openaiStream, toOpenAIMessages, toOpenAITools, resolveModel, isRetryableError, retryDelayMs, parseRetryAfterMs, friendlyError, missingKeyError, MAX_ATTEMPTS, STALL_MS, MAX_RETRY_DELAY_MS };

@@ -16,7 +16,7 @@
 
   <div id="setupView" class="hidden">
     <h2>Add your Anthropic API key</h2>
-    <p class="secondary">D-Shift sends your questions and screen context to Claude using your own key. The key is stored encrypted on this PC (Windows DPAPI).</p>
+    <p class="secondary">D Shift sends your questions and screen context to Claude using your own key. The key is stored encrypted on this PC (Windows DPAPI).</p>
     <input id="setupKey" type="password" placeholder="sk-ant-...">
     <p id="setupError" class="hidden">Couldn't save the key. Try again.</p>
     <div class="setuprow"><a href="#" id="setupGetKey">Get a key</a><span class="spacer"></span><button id="setupSave" class="prominent" disabled>Save</button></div>
@@ -44,7 +44,7 @@
           <span id="sendControls"></span>
         </div>
       </div>
-      <button id="autoHint" title="Session-only in ours: auto mode never survives a restart">
+      <button id="autoHint" title="Session only: auto mode never survives a restart">
         <span id="autoIcon">✋</span><span id="autoText">asks before computer use</span><span class="tertiary">(shift+tab to cycle)</span>
       </button>
     </div>
@@ -71,7 +71,7 @@
   <label>API key <span class="tertiary">(stored encrypted with Windows DPAPI)</span><input id="setKey" type="password" placeholder="paste key, then Save"></label>
   <label>Effort <select id="setEffort"><option value="low">low — fast sidebar answers</option><option value="medium">medium</option><option value="high">high — deeper answers</option></select></label>
   <label>Daily budget cap (USD, 0 = off) <input id="setBudget" type="number" min="0" step="0.5"></label>
-  <label>No-read apps <span class="tertiary">(comma separated)</span><input id="setDenylist" type="text"></label>
+  <label>No read apps <span class="tertiary">(comma separated)</span><input id="setDenylist" type="text"></label>
   <p class="tertiary" id="setPaths"></p>
   <div class="row"><button id="setOpenMemory">Open memory folder</button><button id="setClose">Close</button><button id="setSave" class="prominent">Save</button></div>
 </div>

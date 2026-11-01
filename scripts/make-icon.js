@@ -2,14 +2,18 @@
 /**
  * make-icon.js — generate the Windows app icon with zero external deps.
  *
- * Draws the D Shift mark (dark rounded square + white ⇧ arrow, the same
- * double-shift glyph as the tray icon) by analytic pixel coverage at 4x
- * supersampling, encodes PNGs with Node's built-in zlib, and packs a
+ * Draws the ShiftSense mark — the Shift key itself: a deep blue keycap
+ * tile (gradient anchored on the product accent rgb(0,92,209)) with a
+ * bold white ⇧ arrow over its base bar and a soft inner highlight along
+ * the top edge, like light catching a key. Analytic pixel coverage at 4x
+ * supersampling, PNGs encoded with Node's built-in zlib, and a
  * PNG-compressed multi-size .ico (valid per the Windows icon spec, Vista+).
  *
  * Outputs:
- *   build/icon.png  — 512x512 master PNG
- *   build/icon.ico  — 256/128/64/48/32/24/16 entries
+ *   build/icon.png     — 512x512 master PNG
+ *   build/icon.ico     — 256/128/64/48/32/24/16 entries
+ *   renderer/icon.png  — 128x128, the icon the app actually loads at
+ *                        runtime for the window and system tray
  *
  * Run: node scripts/make-icon.js   (preflight checks the outputs exist;
  * regenerate any time the mark changes — the outputs are committed.)
@@ -58,13 +62,24 @@ function encodePNG(width, height, rgba) {
 }
 
 /* ---------- the mark ---------- */
-// Background: rounded square, vertical gradient #262a33 -> #14161a.
-// Foreground: shift arrow (head + shaft) over a base bar, #eef1f5.
-const BG_TOP = [38, 42, 51], BG_BOT = [20, 22, 26], FG = [238, 241, 245];
+// Background: rounded square keycap, vertical two-stop gradient through
+// the product accent rgb(0,92,209): brighter blue at the top edge,
+// deepening below, so the tile reads as the brand color at any size.
+// Foreground: bold shift arrow (head + shaft) over its base bar,
+// near-white for maximum contrast against the blue.
+const BG_TOP = [44, 123, 224], BG_MID = [0, 92, 209], BG_BOT = [0, 58, 138];
+const FG = [250, 251, 253];
 const ARROW = [ // unit-space polygon for the ⇧ arrow
-  [0.50, 0.15], [0.79, 0.44], [0.63, 0.44], [0.63, 0.67],
-  [0.37, 0.67], [0.37, 0.44], [0.21, 0.44],
+  [0.50, 0.16], [0.78, 0.45], [0.625, 0.45], [0.625, 0.66],
+  [0.375, 0.66], [0.375, 0.45], [0.22, 0.45],
 ];
+function bgColor(v) {
+  // v is unit-space; normalize across the tile (0.02..0.98) so the accent
+  // sits at the tile's vertical middle, behind the arrow.
+  const t = Math.min(1, Math.max(0, (v - 0.02) / 0.96));
+  const [a, b, k] = t < 0.5 ? [BG_TOP, BG_MID, t * 2] : [BG_MID, BG_BOT, (t - 0.5) * 2];
+  return [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
+}
 function inPoly(x, y, poly) {
   let inside = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
@@ -81,10 +96,10 @@ function inRoundRect(x, y, x0, y0, x1, y1, r) {
 }
 function isForeground(u, v) {
   if (inPoly(u, v, ARROW)) return true;
-  return inRoundRect(u, v, 0.29, 0.755, 0.71, 0.845, 0.03); // base bar
+  return inRoundRect(u, v, 0.295, 0.75, 0.705, 0.84, 0.032); // base bar
 }
 function isBackground(u, v) {
-  return inRoundRect(u, v, 0.02, 0.02, 0.98, 0.98, 0.21);
+  return inRoundRect(u, v, 0.02, 0.02, 0.98, 0.98, 0.20);
 }
 function render(size) {
   const SS = 4; // supersampling per axis
@@ -97,10 +112,12 @@ function render(size) {
           const u = (x + (sx + 0.5) / SS) / size;
           const v = (y + (sy + 0.5) / SS) / size;
           if (!isBackground(u, v)) continue;
-          const t = v;
-          let cr = BG_TOP[0] + (BG_BOT[0] - BG_TOP[0]) * t;
-          let cg = BG_TOP[1] + (BG_BOT[1] - BG_TOP[1]) * t;
-          let cb = BG_TOP[2] + (BG_BOT[2] - BG_TOP[2]) * t;
+          let [cr, cg, cb] = bgColor(v);
+          // Soft inner highlight: a sheen along the top inner edge of the
+          // keycap, strongest at the edge and gone by v=0.32. Background
+          // only — the glyph stays flat near-white.
+          const sheen = Math.pow(Math.max(0, 1 - (v - 0.02) / 0.30), 2) * 0.15;
+          cr += (255 - cr) * sheen; cg += (255 - cg) * sheen; cb += (255 - cb) * sheen;
           if (isForeground(u, v)) { cr = FG[0]; cg = FG[1]; cb = FG[2]; }
           r += cr; g += cg; b += cb; a += 255;
         }
@@ -134,16 +151,22 @@ function buildICO(pngBySize) {
 }
 
 function main() {
-  const buildDir = path.join(__dirname, '..', 'build');
+  const root = path.join(__dirname, '..');
+  const buildDir = path.join(root, 'build');
   fs.mkdirSync(buildDir, { recursive: true });
   const sizes = [256, 128, 64, 48, 32, 24, 16];
   const pngs = {};
   for (const s of sizes) pngs[s] = render(s);
   fs.writeFileSync(path.join(buildDir, 'icon.png'), render(512));
   fs.writeFileSync(path.join(buildDir, 'icon.ico'), buildICO(pngs));
+  // The runtime icon (window + system tray) comes from the same artwork:
+  // reuse the ICO's 128px render so every surface shows the identical mark.
+  const trayPath = path.join(root, 'renderer', 'icon.png');
+  fs.writeFileSync(trayPath, pngs[128]);
   const icoKB = (fs.statSync(path.join(buildDir, 'icon.ico')).size / 1024).toFixed(1);
   const pngKB = (fs.statSync(path.join(buildDir, 'icon.png')).size / 1024).toFixed(1);
-  console.log(`build/icon.png (512x512, ${pngKB} KB) and build/icon.ico (${sizes.join('/')}px, ${icoKB} KB) written`);
+  const trayKB = (fs.statSync(trayPath).size / 1024).toFixed(1);
+  console.log(`build/icon.png (512x512, ${pngKB} KB), build/icon.ico (${sizes.join('/')}px, ${icoKB} KB) and renderer/icon.png (128x128, ${trayKB} KB) written`);
 }
 if (require.main === module) main();
 module.exports = { render, buildICO, encodePNG };
