@@ -12,7 +12,7 @@
  *  B2  Codex approvals are serialized through ApprovalQueue: one card at
  *      a time, every request resolves (allow/deny/120s timeout/Stop).
  */
-const { app, BrowserWindow, Tray, Menu, ipcMain, globalShortcut, desktopCapturer, shell, safeStorage, nativeImage, screen } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, globalShortcut, desktopCapturer, shell, safeStorage, nativeImage, screen, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { execFile } = require('child_process');
@@ -33,12 +33,45 @@ const nativePath = name => path.join(__dirname, 'native', name).replace(/app\.as
 const uia = new UiaClient({ hostPath: nativePath('uia-host.ps1') });
 
 const dataDir = defaultDataDir();
+
+// ---------- crash safety net ----------
+// A real user hit Electron's raw "A JavaScript error occurred in the main
+// process" dialog on close (v1.5.0): a timer touched a destroyed window.
+// The root causes are guarded below; this net makes sure a stray main-
+// process error can never again surface as a raw stack dialog — it is
+// logged to <data>/logs/crash.log, destroyed-object errors (always a
+// shutdown race) are swallowed after logging, and anything else gets one
+// friendly dialog per session instead of a stack trace.
+let crashDialogShown = false;
+function logCrash(kind, err) {
+  try {
+    const dir = path.join(dataDir, 'logs'); fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(path.join(dir, 'crash.log'), `${new Date().toISOString()} [${kind}] ${err?.stack || err}\n`);
+  } catch { /* logging must never throw */ }
+}
+process.on('uncaughtException', err => {
+  logCrash('uncaughtException', err);
+  if (/Object has been destroyed/i.test(String(err?.message || err))) return; // shutdown race; harmless
+  if (!crashDialogShown) {
+    crashDialogShown = true;
+    try { dialog.showErrorBox('ShiftSense ran into a problem', `Something unexpected happened. The app will keep running; details were saved to:\n${path.join(dataDir, 'logs', 'crash.log')}`); } catch { /* noop */ }
+  }
+});
+process.on('unhandledRejection', err => logCrash('unhandledRejection', err));
+
 const memory = new MemoryStore(dataDir).seed();
 let settings = settingsMod.loadSettings(dataDir);
 const store = new ChatStore(dataDir, settings.priceOverrides);
 const codex = new CodexHandoff({ dataDir });
 const ledger = new SpendLedger(dataDir);
 let win = null, tray = null, aborter = null;
+let trackerTimer = null, uiohookRef = null;
+/** The ONLY safe way to touch the window: a referenced BrowserWindow whose
+ *  native object was destroyed throws "Object has been destroyed" on any
+ *  method call — truthiness of the JS reference is NOT enough. */
+const winAlive = () => { try { return !!win && !win.isDestroyed(); } catch { return false; } };
+/** Same for renderer sends during/after window teardown (mid-turn quit). */
+const sendTo = (sender, channel, payload) => { try { if (sender && !sender.isDestroyed()) sender.send(channel, payload); } catch { /* renderer gone */ } };
 let codexDetected = { found: false };
 let hookStatus = { doubleShift: false, detail: 'starting' };
 const PROVIDER_DEFAULT_MODEL = { anthropic: 'claude-sonnet-5-5', openai: 'gpt-5', ollama: 'ollama:llama3.1' };
@@ -53,7 +86,7 @@ const approvals = new ApprovalQueue({
   timeoutMs: 120000,
   present: (payload, finish) => {
     pendingDecision = finish;
-    win?.webContents.send('codex:approval', payload);
+    if (winAlive()) sendTo(win.webContents, 'codex:approval', payload);
   },
 });
 let pendingDecision = null;
@@ -61,12 +94,17 @@ let pendingDecision = null;
 // ---------- window ----------
 function createWindow() {
   const { workArea } = screen.getPrimaryDisplay();
-  // His panel: 400pt default, min 300x320, docked right with an 8pt inset;
-  // size and vertical position are remembered across launches.
+  // Panel: 400pt default, min 300x320, docked right with an 8pt inset; size
+  // and vertical position are remembered across launches — but CLAMPED to
+  // the display that exists NOW. A remembered size from a larger monitor
+  // (dock/undock, laptop lid, remote session) must never open the panel
+  // off-screen or larger than the current work area.
   const saved = settings.panelBounds || {};
-  const width = Math.max(300, saved.width || 400), height = Math.max(320, saved.height || workArea.height - 16);
+  const width = Math.min(Math.max(300, saved.width || 400), Math.max(300, workArea.width - 16));
+  const height = Math.min(Math.max(320, saved.height || workArea.height - 16), Math.max(320, workArea.height));
+  const yOffset = Math.min(Math.max(0, saved.yOffset ?? 8), Math.max(0, workArea.height - 320));
   win = new BrowserWindow({
-    width, height, x: workArea.x + workArea.width - width - 8, y: workArea.y + (saved.yOffset ?? 8), minWidth: 300, minHeight: 320,
+    width, height, x: workArea.x + workArea.width - width - 8, y: workArea.y + yOffset, minWidth: 300, minHeight: 320,
     frame: false, transparent: true,
     alwaysOnTop: true, skipTaskbar: true, resizable: true, show: false,
     focusable: false,
@@ -76,27 +114,42 @@ function createWindow() {
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   let boundsTimer = null;
-  win.on('resize', () => { clearTimeout(boundsTimer); boundsTimer = setTimeout(() => { if (!win) return; const b = win.getBounds(); const { workArea } = screen.getPrimaryDisplay(); settings.panelBounds = { width: b.width, height: b.height, yOffset: Math.max(0, b.y - workArea.y) }; settingsMod.saveSettings(dataDir, settings); }, 400); });
+  win.on('resize', () => { clearTimeout(boundsTimer); boundsTimer = setTimeout(() => { if (!winAlive()) return; const b = win.getBounds(); const { workArea } = screen.getPrimaryDisplay(); settings.panelBounds = { width: b.width, height: b.height, yOffset: Math.max(0, b.y - workArea.y) }; settingsMod.saveSettings(dataDir, settings); }, 400); });
   win.on('close', e => { if (!app.isQuitting) { e.preventDefault(); hideSidebar(); } });
+  win.on('closed', () => { clearTimeout(boundsTimer); win = null; });
+}
+/** If a display change leaves the panel outside every screen (monitor
+ *  unplugged while it was docked there), pull it back onto the primary. */
+function ensureWindowOnScreen() {
+  if (!winAlive() || !win.isVisible()) return;
+  const b = win.getBounds();
+  const onSomeDisplay = screen.getAllDisplays().some(d => {
+    const a = d.workArea;
+    return b.x + b.width > a.x && b.x < a.x + a.width && b.y + b.height > a.y && b.y < a.y + a.height;
+  });
+  if (!onSomeDisplay) {
+    const { workArea } = screen.getPrimaryDisplay();
+    win.setPosition(workArea.x + workArea.width - b.width - 8, workArea.y + 8);
+  }
 }
 function showSidebar() {
-  if (!win) createWindow();
+  if (!winAlive()) { win = null; createWindow(); }
   win.setFocusable(true);
   win.showInactive();
-  win.webContents.send('sidebar:shown');
+  sendTo(win.webContents, 'sidebar:shown');
   registerEsc();
   const c = lastExternal.value;
-  try { win.webContents.send('ctx:update', { app: c.app, title: c.title, mode: c.mode }); } catch { /* noop */ }
+  sendTo(win.webContents, 'ctx:update', { app: c.app, title: c.title, mode: c.mode });
 }
-function hideSidebar() { if (win) win.hide(); try { globalShortcut.unregister('Escape'); } catch { /* noop */ } }
-function toggleSidebar(forceShow = false) { if (win && win.isVisible() && !forceShow) hideSidebar(); else showSidebar(); }
+function hideSidebar() { if (winAlive()) win.hide(); try { globalShortcut.unregister('Escape'); } catch { /* noop */ } }
+function toggleSidebar(forceShow = false) { if (winAlive() && win.isVisible() && !forceShow) hideSidebar(); else showSidebar(); }
 function registerEsc() {
   // M4 fix: when the key hook is alive, Esc is OBSERVED (not consumed) there,
   // so other apps still receive it. globalShortcut — which hijacks Esc
   // system-wide — is only the fallback, and its result is checked.
   if (hookStatus.doubleShift) return;
   try {
-    const ok = globalShortcut.register('Escape', () => { if (win && win.isVisible()) hideSidebar(); });
+    const ok = globalShortcut.register('Escape', () => { if (winAlive() && win.isVisible()) hideSidebar(); });
     if (!ok) console.warn('[dshift] Escape registration failed (another app owns it); use the ✕ button or double-Shift to close');
   } catch { /* already registered */ }
 }
@@ -109,13 +162,14 @@ function startShiftHook() {
     const SHIFT = new Set([UiohookKey.Shift, UiohookKey.ShiftRight]);
     uIOhook.on('keydown', e => {
       const t = Date.now();
-      if (e.keycode === UiohookKey.Escape) { if (win && win.isVisible()) hideSidebar(); return; }
+      if (e.keycode === UiohookKey.Escape) { if (winAlive() && win.isVisible()) hideSidebar(); return; }
       if (SHIFT.has(e.keycode)) detector.feed({ type: 'shiftDown', side: e.keycode === UiohookKey.ShiftRight ? 'right' : 'left', time: t, repeat: !!e.repeat });
       else if (e.ctrlKey || e.altKey || e.metaKey) detector.feed({ type: 'modifierDown', time: t });
       else detector.feed({ type: 'otherKey', time: t });
     });
     uIOhook.on('keyup', e => { if (SHIFT.has(e.keycode)) detector.feed({ type: 'shiftUp', time: Date.now() }); });
     uIOhook.start();
+    uiohookRef = uIOhook;
     hookStatus = { doubleShift: true, detail: 'double-Shift hook active' };
   } catch (e) {
     hookStatus = { doubleShift: false, detail: `double-Shift unavailable (${e.message}); fallback shortcut active` };
@@ -168,7 +222,17 @@ async function getContext(force) {
   return lastExternal.value;
 }
 function startContextTracker() {
-  setInterval(() => { if (!win || !win.isVisible()) refreshExternal().catch(() => {}); }, 4000);
+  if (trackerTimer) return;
+  // v1.5.0 crash (real user report): this interval was never stored or
+  // cleared, and `win.isVisible()` throws "Object has been destroyed" once
+  // the window is torn down during quit — the truthiness check `!win` does
+  // not help because the JS reference outlives the native window. Guard
+  // with winAlive(), and clear the timer on will-quit.
+  trackerTimer = setInterval(() => {
+    if (winAlive() && win.isVisible()) return; // sidebar open: no tracking needed
+    refreshExternal().catch(() => {});
+  }, 4000);
+  if (trackerTimer.unref) trackerTimer.unref();
 }
 async function takeScreenshot(scope = 'window') {
   const sources = await desktopCapturer.getSources({ types: [scope === 'screen' ? 'screen' : 'window'], thumbnailSize: { width: 1568, height: 1568 } });
@@ -256,8 +320,8 @@ function wireIPC() {
     // the cap; actuals are added per request in onUsage; release at turn end.
     const cap = settings.budgetUSDPerDay || 0;
     const reservation = cap > 0 ? ledger.reserve(0.25) : null;
-    if (reservation && ledger.wouldExceed(cap, reservation)) { ledger.release(reservation); e.sender.send('chat:error', { tabId: tab.id, error: `Daily budget cap reached ($${cap.toFixed(2)}; spent $${ledger.spentToday().toFixed(2)} today). Raise it in Settings.` }); return store.publicState(); }
-    if (ledger.exceeded(cap)) { if (reservation) ledger.release(reservation); e.sender.send('chat:error', { tabId: tab.id, error: `Daily budget cap reached ($${cap.toFixed(2)}; spent $${ledger.spentToday().toFixed(2)} today). Raise it in Settings.` }); return store.publicState(); }
+    if (reservation && ledger.wouldExceed(cap, reservation)) { ledger.release(reservation); sendTo(e.sender, 'chat:error', { tabId: tab.id, error: `Daily budget cap reached ($${cap.toFixed(2)}; spent $${ledger.spentToday().toFixed(2)} today). Raise it in Settings.` }); return store.publicState(); }
+    if (ledger.exceeded(cap)) { if (reservation) ledger.release(reservation); sendTo(e.sender, 'chat:error', { tabId: tab.id, error: `Daily budget cap reached ($${cap.toFixed(2)}; spent $${ledger.spentToday().toFixed(2)} today). Raise it in Settings.` }); return store.publicState(); }
     const atts = Array.isArray(attachments) ? attachments.filter(a => a && a.jpegBase64) : [];
     store.addDisplay(tab, { role: 'user', text: question, at: new Date().toISOString(), attachments: atts.map(a => a.dataUrl).filter(Boolean) });
     memory.logHistory({ role: 'user', text: question, tabId: tab.id });
@@ -266,7 +330,7 @@ function wireIPC() {
       memory,
       getContext: async force => { if (force) tab.usage.screenReads++; return getContext(force); },
       takeScreenshot: async scope => { tab.usage.screenshots++; return takeScreenshot(scope); },
-      onUsage: u => { tab.usage.record(u); ledger.add(costOf(u, resolveModel(settings.provider, tab.model || settings.model), settings.priceOverrides)); store.saveSoon(); e.sender.send('state:patch', store.publicState()); },
+      onUsage: u => { tab.usage.record(u); ledger.add(costOf(u, resolveModel(settings.provider, tab.model || settings.model), settings.priceOverrides)); store.saveSoon(); sendTo(e.sender, 'state:patch', store.publicState()); },
       callLLM: args => callLLM(tab, args),
       requestCodexApproval: async task => {
         if (!codexDetected.found) codexDetected = await codex.detect();
@@ -275,16 +339,16 @@ function wireIPC() {
         try { req = codex.requestApproval(task); } catch (err) { return { text: String(err.message || err) }; }
         const verdict = sessionAuto ? { ok: true, reason: 'allowed' } : await approvals.askDetailed(req); // serialized; always resolves (B2). Session auto skips the card but never the audit log.
         if (!verdict.ok) { codex.deny(req.approvalId, verdict.reason === 'timeout' ? 'approval timed out' : verdict.reason === 'cancelled' ? 'cancelled by user (Stop)' : 'denied by user'); return { text: 'The user did not approve this computer task (denied, timed out, or stopped). Do not retry it.' }; }
-        const r = await codex.approve(req.approvalId, codexDetected.path, txt => e.sender.send('codex:progress', { approvalId: req.approvalId, text: txt }));
+        const r = await codex.approve(req.approvalId, codexDetected.path, txt => sendTo(e.sender, 'codex:progress', { approvalId: req.approvalId, text: txt }));
         return { text: r.text };
       },
     };
     try {
-      const res = await runTurn({ tab, question, images: atts.map(a => a.jpegBase64), host, onText: delta => e.sender.send('chat:delta', { tabId: tab.id, delta }), onTool: t => e.sender.send('chat:tool', { tabId: tab.id, ...t }) });
+      const res = await runTurn({ tab, question, images: atts.map(a => a.jpegBase64), host, onText: delta => sendTo(e.sender, 'chat:delta', { tabId: tab.id, delta }), onTool: t => sendTo(e.sender, 'chat:tool', { tabId: tab.id, ...t }) });
       store.addDisplay(tab, { role: 'assistant', text: res.text || '', at: new Date().toISOString() });
       memory.logHistory({ role: 'assistant', text: res.text || '', tabId: tab.id });
     } catch (err) {
-      e.sender.send('chat:error', { tabId: tab.id, error: String(err.message || err) });
+      sendTo(e.sender, 'chat:error', { tabId: tab.id, error: String(err.message || err) });
     } finally {
       if (reservation) ledger.release(reservation); // actuals already added per request
     }
@@ -301,11 +365,11 @@ function buildTrayMenu() {
     { label: 'Toggle Sidebar (Shift Shift)', click: () => toggleSidebar() },
     { label: 'Open Memory Folder', click: () => shell.openPath(memory.memoryDir) },
     { label: 'Open Feedback Folder', click: () => { const dir = path.join(dataDir, 'feedback'); fs.mkdirSync(dir, { recursive: true }); shell.openPath(dir); } },
-    { label: 'Change API Key...', click: () => { showSidebar(); win?.webContents.send('ui:openSettings'); } },
-    { label: 'Set OpenAI API Key...', click: () => { settings.provider = 'openai'; settingsMod.saveSettings(dataDir, settings); showSidebar(); win?.webContents.send('ui:openSettings'); refreshTrayMenu(); } },
+    { label: 'Change API Key...', click: () => { showSidebar(); if (winAlive()) sendTo(win.webContents, 'ui:openSettings'); } },
+    { label: 'Set OpenAI API Key...', click: () => { settings.provider = 'openai'; settingsMod.saveSettings(dataDir, settings); showSidebar(); if (winAlive()) sendTo(win.webContents, 'ui:openSettings'); refreshTrayMenu(); } },
     { type: 'separator' },
-    { label: 'New Chat Tab', click: () => { store.newTab(PROVIDER_DEFAULT_MODEL[settings.provider] || settings.model); showSidebar(); win?.webContents.send('state:patch', store.publicState()); } },
-    { label: 'Settings…', click: () => { showSidebar(); win?.webContents.send('ui:openSettings'); } },
+    { label: 'New Chat Tab', click: () => { store.newTab(PROVIDER_DEFAULT_MODEL[settings.provider] || settings.model); showSidebar(); if (winAlive()) sendTo(win.webContents, 'state:patch', store.publicState()); } },
+    { label: 'Settings…', click: () => { showSidebar(); if (winAlive()) sendTo(win.webContents, 'ui:openSettings'); } },
     prov('anthropic'), prov('openai'), prov('ollama'),
     { type: 'separator' },
     { label: 'Quit D-Shift', click: () => { app.isQuitting = true; app.quit(); } },
@@ -329,10 +393,23 @@ if (gotLock) {
     if (store.recoveryInfo.archiveFromBackup) console.warn('[dshift] chat archive was recovered from a backup file');
     if (ledger.recoveredFromBackup) console.warn('[dshift] today\'s spend ledger was recovered from a backup file');
     createWindow(); wireIPC(); createTray(); startShiftHook(); startContextTracker();
+    screen.on('display-removed', ensureWindowOnScreen);
+    screen.on('display-metrics-changed', ensureWindowOnScreen);
     refreshExternal().catch(() => {});
     codexDetected = await codex.detect().catch(() => ({ found: false }));
     if (settings.launchAtLogin) app.setLoginItemSettings({ openAtLogin: true });
   });
 }
-app.on('will-quit', () => { approvals.cancelAll(); globalShortcut.unregisterAll(); });
+app.on('will-quit', () => {
+  // Orderly teardown: stop every background actor BEFORE windows are
+  // destroyed, and flush state. The v1.5.0 close crash came from the
+  // context tracker outliving the window; nothing may outlive this hook.
+  if (trackerTimer) { clearInterval(trackerTimer); trackerTimer = null; }
+  approvals.cancelAll();
+  try { codex.stop(); } catch { /* noop */ }
+  try { uia.close(); } catch { /* noop */ }
+  try { if (uiohookRef) uiohookRef.stop(); } catch { /* noop */ }
+  try { store.save(); } catch { /* final flush (dirty-checked, cheap) */ }
+  globalShortcut.unregisterAll();
+});
 app.on('window-all-closed', () => { /* tray app: stay alive */ });

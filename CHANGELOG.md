@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.5.1 — Close-crash fix + environment hardening (2026-11-02)
+
+Fixes the crash a real user hit on Windows within minutes of installing v1.5.0, plus the whole class of related issues found by auditing every timer, send, and shutdown path in the main process.
+
+- **Fixed: "Object has been destroyed" error dialog on close.** The 4-second screen-context tracker kept firing after the window was torn down during quit, and calling `isVisible()` on a destroyed window throws. The tracker is now guarded by a destroyed-aware check and is cleared on quit. A new `npm run smoke` regression harness boots the real app, destroys the window, and fails if any destroyed-object error escapes — it reproduces the original crash exactly (2 errors) against the old code and passes against this build.
+- **Every window/renderer access hardened.** All main-process code now goes through destroyed-aware guards (`winAlive()` / `sendTo()`): streaming sends during a mid-turn quit, tray menu actions, approval cards, the resize-save timer, the Esc paths, and the key-hook callbacks can no longer throw against a dead window. The window reference is nulled on `closed`.
+- **Orderly quit.** `will-quit` now stops the context tracker, cancels approvals, stops Codex and the UI Automation host, stops the keyboard hook, and flushes chats to disk — nothing outlives the app, and a pending coalesced save is no longer lost on exit.
+- **No more raw error dialogs.** A main-process safety net logs unexpected errors to `~/DShift/logs/crash.log`; destroyed-object shutdown races are swallowed after logging, and anything else shows one friendly dialog naming the log file instead of a stack trace.
+- **Fits changing displays.** Remembered panel size/position is clamped to the display that exists at launch (a size saved on a large monitor can no longer open off-screen on a laptop), and if a monitor is unplugged while the panel sits on it, the panel is re-docked onto the primary display.
+- **Download checksums are now automatic**: every release ships `SHA256SUMS.txt` (v1.5.0's was backfilled manually).
+
 ## 1.5.0 — Scale-and-release pass (2026-11-01)
 
 Everything re-verified end to end, the repo restructured into a standard product layout, and the first GitHub Release (Windows installer built by CI on a real Windows runner).

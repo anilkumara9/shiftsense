@@ -65,7 +65,8 @@
     "shot": "node scripts/shot.js",
     "start": "electron .",
     "test": "node scripts/test.js",
-    "stress": "node scripts/stress.js"
+    "stress": "node scripts/stress.js",
+    "smoke": "node scripts/quit-smoke.js"
   },
-  "version": "1.5.0"
+  "version": "1.5.1"
 }
