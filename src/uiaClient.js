@@ -112,7 +112,7 @@ class UiaClient {
         this._onHostEnd(child);
         try { child.kill(); } catch { /* already gone */ }
       }, this.timeoutMs);
-      if (timer.unref) timer.unref();
+      // Not unref'd — see approvalQueue.js: this timer settles an awaited promise.
       this._pending.set(id, { finish, child });
       try {
         child.stdin.write(JSON.stringify({ id }) + '\n');

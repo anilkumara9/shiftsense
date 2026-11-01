@@ -25,7 +25,11 @@ class ApprovalQueue {
       const entry = { finish: (ok, reason) => { this.pending.delete(entry); if (timer) clearTimeout(timer); resolve({ ok: !!ok, reason: reason || (ok ? 'allowed' : 'denied') }); } };
       if (gen !== this.generation) { entry.finish(false, 'cancelled'); return; } // cancelled while queued
       timer = setTimeout(() => entry.finish(false, 'timeout'), this.timeoutMs);
-      if (timer.unref) timer.unref();
+      // Deliberately NOT unref'd: this timer resolves a promise a caller is
+      // awaiting. An unref'd timer lets the event loop drain first in
+      // bare-Node hosts (CI test runners on Node 20 fail such tests with
+      // "Promise resolution is still pending"). In the app, the window and
+      // hook keep the loop alive anyway; a pending approval SHOULD hold.
       this.pending.add(entry);
       try { this.present(payload, entry.finish); } catch { entry.finish(false, 'denied'); }
     });
