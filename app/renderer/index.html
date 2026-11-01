@@ -1,68 +1,90 @@
 <!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:">
 <title>D Shift</title><link rel="stylesheet" href="style.css"></head>
 <body>
 <div id="app">
-  <header id="titlebar">
-    <div class="brand">⇧⇧ <b>D Shift</b> <span id="ctxApp" class="dim"></span></div>
-    <div class="actions">
-      <button id="btnMemory" title="Memory (markdown files you own)">🧠</button>
-      <button id="btnSettings" title="Settings">⚙️</button>
-      <button id="btnHide" title="Hide (Esc)">✕</button>
-    </div>
-  </header>
-  <nav id="tabs"></nav>
-  <div id="usagebar" class="dim"></div>
-  <main id="transcript"></main>
-  <div id="queuebar"></div>
-  <footer>
-    <textarea id="input" rows="2" placeholder="Ask about your screen…  (Enter to send, Esc to close)"></textarea>
-    <div class="footrow">
-      <select id="modelSel" title="Model for this tab"></select>
-      <span id="hint" class="dim">double-tap ⇧ to toggle</span>
-      <button id="btnStop" class="hidden">Stop</button>
-      <button id="btnSend">Send ↑</button>
-    </div>
-  </footer>
-</div>
+  <!-- TabStrip (his exact order: tabs, +, history, feedback, hide) + our extras after his -->
+  <div id="tabstrip">
+    <div id="tabs"></div>
+    <button class="iconbtn" id="btnHistory" title="Chat history (Ctrl+Y)">↺</button>
+    <button class="iconbtn" id="btnFeedback" title="Send feedback on the sidebar">💬</button>
+    <button class="iconbtn" id="btnMemory" title="Memory — plain markdown, yours">🧠</button>
+    <button class="iconbtn" id="btnSettings" title="Settings">⚙</button>
+    <button class="iconbtn" id="btnHide" title="Hide sidebar">✕</button>
+  </div>
 
-<div id="approval" class="modal hidden">
-  <div class="card">
-    <h3>🤖 Codex computer task — approve?</h3>
-    <p class="dim">D Shift wants to hand this task to Codex. It runs read-only, in the background, and only if you allow this one task. Approvals are never remembered.</p>
-    <pre id="approvalTask"></pre>
-    <div id="approvalProgress" class="dim"></div>
-    <div class="row"><button id="apprDeny">Deny</button><button id="apprAllow" class="primary">Allow this task</button></div>
+  <div id="setupView" class="hidden">
+    <h2>Add your Anthropic API key</h2>
+    <p class="secondary">D-Shift sends your questions and screen context to Claude using your own key. The key is stored encrypted on this PC (Windows DPAPI).</p>
+    <input id="setupKey" type="password" placeholder="sk-ant-...">
+    <p id="setupError" class="hidden">Couldn't save the key. Try again.</p>
+    <div class="setuprow"><a href="#" id="setupGetKey">Get a key</a><span class="spacer"></span><button id="setupSave" class="prominent" disabled>Save</button></div>
+  </div>
+
+  <div id="chatView">
+    <div id="ctxHeader">
+      <span id="ctxIcon">🖥</span><span class="eye">👁</span>
+      <span id="ctxApp">No app</span><span id="ctxTitle"></span>
+      <span class="spacer"></span>
+      <select id="modelSel" title="Model for this tab — our addition: he hardcodes his"></select>
+    </div>
+    <div class="divider"></div>
+    <main id="transcript"></main>
+    <div id="queueView" class="hidden"></div>
+    <div id="usagebar"></div>
+    <div id="composer">
+      <div id="commandMenu" class="hidden"></div>
+      <div id="inputCard">
+        <div id="attachRow" class="hidden"></div>
+        <div id="fieldRow">
+          <textarea id="input" rows="1" placeholder="Ask about your screen..."></textarea>
+          <button class="iconbtn" id="btnAppshot" title="Appshot: attach the current window (Ctrl+Shift)">📷</button>
+          <button class="iconbtn" id="btnPhoto" title="Attach an image (or paste / drop one)">🖼</button>
+          <span id="sendControls"></span>
+        </div>
+      </div>
+      <button id="autoHint" title="Session-only in ours: auto mode never survives a restart">
+        <span id="autoIcon">✋</span><span id="autoText">asks before computer use</span><span class="tertiary">(shift+tab to cycle)</span>
+      </button>
+    </div>
   </div>
 </div>
 
-<div id="settings" class="modal hidden">
-  <div class="card">
-    <h3>Settings</h3>
-    <label>Provider
-      <select id="setProvider"><option value="anthropic">Anthropic (Claude)</option><option value="openai">OpenAI</option><option value="ollama">Ollama — local, free</option></select></label>
-    <label>API key <span class="dim">(stored encrypted with Windows DPAPI, never in plain text)</span>
-      <input id="setKey" type="password" placeholder="paste key, then Save"></label>
-    <label>Effort <select id="setEffort"><option value="low">low — fast sidebar answers</option><option value="medium">medium</option><option value="high">high — deeper answers</option></select></label>
-    <label>Daily budget cap (USD, 0 = off) <input id="setBudget" type="number" min="0" step="0.5"></label>
-    <label>No-read apps <span class="dim">(comma separated — these apps' screens are never read)</span>
-      <input id="setDenylist" type="text"></label>
-    <p class="dim" id="setPaths"></p>
-    <div class="row"><button id="setOpenMemory">Open memory folder</button><button id="setClose">Close</button><button id="setSave" class="primary">Save</button></div>
-  </div>
+<input type="file" id="filePicker" accept="image/*" multiple class="hidden">
+
+<div id="historyPop" class="popover hidden">
+  <input id="histSearch" type="text" placeholder="Search chats">
+  <div id="histList"></div>
 </div>
 
-<div id="memoryDrawer" class="modal hidden">
-  <div class="card wide">
-    <h3>Memory — plain markdown, yours to edit</h3>
-    <div class="memwrap"><ul id="memFiles"></ul>
-      <div class="memedit"><textarea id="memText" rows="16"></textarea>
-      <div class="row"><button id="memUndo">Undo last model write</button><button id="memSave" class="primary">Save file</button></div>
-      <div id="memAudit" class="dim"></div></div>
-    </div>
-    <div class="row"><button id="memOpenFolder">Open folder</button><button id="memClose">Close</button></div>
-  </div>
+<div id="feedbackPop" class="popover hidden">
+  <h3>What should change?</h3>
+  <textarea id="fbNote" rows="5" placeholder="Describe the bug or idea..."></textarea>
+  <label id="fbShotRow" class="hidden"><input type="checkbox" id="fbInclude" checked> <img id="fbShot" alt="screenshot"></label>
+  <div class="row"><button id="fbCancel">Cancel</button><button id="fbSend" class="prominent">Send</button></div>
 </div>
+
+<div id="settingsPop" class="popover wide hidden">
+  <h3>Settings</h3>
+  <label>Provider <select id="setProvider"><option value="anthropic">Anthropic (Claude)</option><option value="openai">OpenAI</option><option value="ollama">Ollama — local, free</option></select></label>
+  <label>API key <span class="tertiary">(stored encrypted with Windows DPAPI)</span><input id="setKey" type="password" placeholder="paste key, then Save"></label>
+  <label>Effort <select id="setEffort"><option value="low">low — fast sidebar answers</option><option value="medium">medium</option><option value="high">high — deeper answers</option></select></label>
+  <label>Daily budget cap (USD, 0 = off) <input id="setBudget" type="number" min="0" step="0.5"></label>
+  <label>No-read apps <span class="tertiary">(comma separated)</span><input id="setDenylist" type="text"></label>
+  <p class="tertiary" id="setPaths"></p>
+  <div class="row"><button id="setOpenMemory">Open memory folder</button><button id="setClose">Close</button><button id="setSave" class="prominent">Save</button></div>
+</div>
+
+<div id="memoryPop" class="popover wide hidden">
+  <h3>Memory — plain markdown, yours to edit</h3>
+  <div class="memwrap"><ul id="memFiles"></ul>
+    <div class="memedit"><textarea id="memText" rows="15"></textarea>
+    <div class="row"><button id="memUndo">Undo last model write</button><button id="memSave" class="prominent">Save file</button></div>
+    <div id="memAudit" class="tertiary"></div></div>
+  </div>
+  <div class="row"><button id="memOpenFolder">Open folder</button><button id="memClose">Close</button></div>
+</div>
+
 <script src="renderer.js"></script>
 </body></html>

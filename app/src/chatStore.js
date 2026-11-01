@@ -90,9 +90,29 @@ class ChatStore {
     return tab;
   }
   get(id) { return this.tabs.find(t => t.id === (id || this.activeId)) || this.tabs[0]; }
+  archiveFile() { return path.join(path.dirname(this.file), 'archive.json'); }
+  readArchive() { try { return JSON.parse(fs.readFileSync(this.archiveFile(), 'utf8')); } catch { return []; } }
+  writeArchive(list) { try { fs.writeFileSync(this.archiveFile(), JSON.stringify(list.slice(0, 200))); } catch { /* best effort */ } }
+  /** Closed chats with content are archived (his ChatArchive) so History can reopen them. */
+  archiveTab(tab) {
+    if (!tab.display?.length) return;
+    const list = this.readArchive().filter(a => a.id !== tab.id);
+    list.unshift({ id: tab.id, title: tab.title, model: tab.model, display: tab.display, messages: stripImages(tab.messages), usage: tab.usage.toJSON(), preview: (tab.display.find(m => m.role === 'user')?.text || '').slice(0, 120), updatedAt: new Date().toISOString() });
+    this.writeArchive(list);
+  }
+  listArchive() { return this.readArchive().map(a => ({ id: a.id, title: a.title, preview: a.preview, updatedAt: a.updatedAt })); }
+  openArchived(id) {
+    const list = this.readArchive(); const a = list.find(x => x.id === id); if (!a) return null;
+    this.writeArchive(list.filter(x => x.id !== id));
+    const tab = { id: a.id, title: a.title, model: a.model, messages: repairTranscript(a.messages || []), display: a.display || [], queue: [], usage: UsageStats.fromJSON(a.usage, this.priceOverrides), createdAt: new Date().toISOString() };
+    this.tabs.push(tab); this.activeId = tab.id; this.save();
+    return tab;
+  }
+  deleteArchived(id) { this.writeArchive(this.readArchive().filter(x => x.id !== id)); }
   closeTab(id) {
     const i = this.tabs.findIndex(t => t.id === id); if (i === -1) return { closed: false, hideSidebar: false };
-    this.tabs.splice(i, 1);
+    const [removed] = this.tabs.splice(i, 1);
+    this.archiveTab(removed);
     if (!this.tabs.length) { this.activeId = null; this.save(); return { closed: true, hideSidebar: true }; } // original: closing last tab hides sidebar
     if (this.activeId === id) this.activeId = this.tabs[Math.max(0, i - 1)].id;
     this.save(); return { closed: true, hideSidebar: false };

@@ -56,9 +56,12 @@ let pendingDecision = null;
 // ---------- window ----------
 function createWindow() {
   const { workArea } = screen.getPrimaryDisplay();
-  const width = 420, height = workArea.height - 16;
+  // His panel: 400pt default, min 300x320, docked right with an 8pt inset;
+  // size and vertical position are remembered across launches.
+  const saved = settings.panelBounds || {};
+  const width = Math.max(300, saved.width || 400), height = Math.max(320, saved.height || workArea.height - 16);
   win = new BrowserWindow({
-    width, height, x: workArea.x + workArea.width - width - 8, y: workArea.y + 8,
+    width, height, x: workArea.x + workArea.width - width - 8, y: workArea.y + (saved.yOffset ?? 8), minWidth: 300, minHeight: 320,
     frame: false, transparent: true,
     alwaysOnTop: true, skipTaskbar: true, resizable: true, show: false,
     focusable: false,
@@ -67,6 +70,8 @@ function createWindow() {
   win.setAlwaysOnTop(true, 'screen-saver');
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  let boundsTimer = null;
+  win.on('resize', () => { clearTimeout(boundsTimer); boundsTimer = setTimeout(() => { if (!win) return; const b = win.getBounds(); const { workArea } = screen.getPrimaryDisplay(); settings.panelBounds = { width: b.width, height: b.height, yOffset: Math.max(0, b.y - workArea.y) }; settingsMod.saveSettings(dataDir, settings); }, 400); });
   win.on('close', e => { if (!app.isQuitting) { e.preventDefault(); hideSidebar(); } });
 }
 function showSidebar() {
@@ -200,6 +205,7 @@ async function callLLM(tab, args) {
 
 // ---------- IPC ----------
 function wireIPC() {
+  ipcMain.handle('ext:open', (_e, url) => { if (/^https:\/\//.test(String(url))) return shell.openExternal(url); });
   ipcMain.handle('state:get', () => ({ state: store.publicState(), settings: { provider: settings.provider, model: settings.model, effort: settings.effort, hasAnthropicKey: !!getApiKey('anthropic'), hasOpenAIKey: !!getApiKey('openai'), keySources: { anthropic: getKeySource('anthropic'), openai: getKeySource('openai') }, denylist: settings.denylist, hook: hookStatus, dataDir, memoryDir: memory.memoryDir, codex: codexDetected, budgetUSDPerDay: settings.budgetUSDPerDay, spentToday: +ledger.spentToday().toFixed(4) } }));
   ipcMain.handle('tab:new', () => { store.newTab(PROVIDER_DEFAULT_MODEL[settings.provider] || settings.model); return store.publicState(); });
   ipcMain.handle('tab:close', (_e, id) => { const r = store.closeTab(id); if (r.hideSidebar) hideSidebar(); return store.publicState(); });
@@ -217,10 +223,29 @@ function wireIPC() {
   ipcMain.handle('codex:detect', async () => { codexDetected = await codex.detect(); return codexDetected; });
   ipcMain.on('codex:decision', (_e, approved) => { const f = pendingDecision; pendingDecision = null; if (f) f(approved); });
 
-  ipcMain.handle('chat:send', async (e, tabId, question) => {
+  let sessionAuto = false; // his AutoMode, made session-only in ours: never persisted, dies with the app
+  ipcMain.handle('auto:set', (_e, on) => { sessionAuto = !!on; return { auto: sessionAuto }; });
+  ipcMain.handle('auto:get', () => ({ auto: sessionAuto }));
+  ipcMain.handle('context:appshot', async () => { const s = await takeScreenshot('window'); return { dataUrl: s.jpegBase64 ? `data:image/jpeg;base64,${s.jpegBase64}` : null, jpegBase64: s.jpegBase64 || null, app: lastExternal.value.app, title: lastExternal.value.title }; });
+  ipcMain.handle('history:list', () => store.listArchive());
+  ipcMain.handle('history:open', (_e, id) => { store.openArchived(id); return store.publicState(); });
+  ipcMain.handle('history:delete', (_e, id) => { store.deleteArchived(id); return store.listArchive(); });
+  ipcMain.handle('feedback:capture', async () => { const s = await takeScreenshot('screen'); return { dataUrl: s.jpegBase64 ? `data:image/jpeg;base64,${s.jpegBase64}` : null, jpegBase64: s.jpegBase64 || null }; });
+  ipcMain.handle('feedback:save', (_e, note, jpegBase64) => {
+    const dir = path.join(dataDir, 'feedback'); fs.mkdirSync(dir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const tab = store.get();
+    fs.writeFileSync(path.join(dir, `${stamp}.md`), `# Feedback ${stamp}\n\n${note}\n\n## Chat (current tab: ${tab?.title || ''})\n\n${(tab?.display || []).map(m => `**${m.role}:** ${m.text}`).join('\n\n')}\n`);
+    if (jpegBase64) fs.writeFileSync(path.join(dir, `${stamp}.jpg`), Buffer.from(jpegBase64, 'base64'));
+    return { ok: true, dir };
+  });
+  ipcMain.handle('feedback:open', () => { const dir = path.join(dataDir, 'feedback'); fs.mkdirSync(dir, { recursive: true }); return shell.openPath(dir); });
+
+  ipcMain.handle('chat:send', async (e, tabId, question, attachments = []) => {
     const tab = store.get(tabId); if (!tab) throw new Error('no tab');
     if (ledger.exceeded(settings.budgetUSDPerDay || 0)) { e.sender.send('chat:error', { tabId: tab.id, error: `Daily budget cap reached ($${(settings.budgetUSDPerDay).toFixed(2)}; spent $${ledger.spentToday().toFixed(2)} today). Raise it in Settings.` }); return store.publicState(); }
-    store.addDisplay(tab, { role: 'user', text: question, at: new Date().toISOString() });
+    const atts = Array.isArray(attachments) ? attachments.filter(a => a && a.jpegBase64) : [];
+    store.addDisplay(tab, { role: 'user', text: question, at: new Date().toISOString(), attachments: atts.map(a => a.dataUrl).filter(Boolean) });
     memory.logHistory({ role: 'user', text: question, tabId: tab.id });
     codex.newTurn(); aborter = new AbortController();
     const host = {
@@ -234,14 +259,14 @@ function wireIPC() {
         if (!codexDetected.found) return { text: 'Codex CLI is not installed, so the task was not run. Tell the user.' };
         let req;
         try { req = codex.requestApproval(task); } catch (err) { return { text: String(err.message || err) }; }
-        const approved = await approvals.ask(req); // serialized; always resolves (B2)
+        const approved = sessionAuto ? true : await approvals.ask(req); // serialized; always resolves (B2). Session auto skips the card but never the audit log.
         if (!approved) { codex.deny(req.approvalId); return { text: 'The user did not approve this computer task (denied, timed out, or stopped). Do not retry it.' }; }
         const r = await codex.approve(req.approvalId, codexDetected.path, txt => e.sender.send('codex:progress', { approvalId: req.approvalId, text: txt }));
         return { text: r.text };
       },
     };
     try {
-      const res = await runTurn({ tab, question, host, onText: delta => e.sender.send('chat:delta', { tabId: tab.id, delta }), onTool: t => e.sender.send('chat:tool', { tabId: tab.id, ...t }) });
+      const res = await runTurn({ tab, question, images: atts.map(a => a.jpegBase64), host, onText: delta => e.sender.send('chat:delta', { tabId: tab.id, delta }), onTool: t => e.sender.send('chat:tool', { tabId: tab.id, ...t }) });
       store.addDisplay(tab, { role: 'assistant', text: res.text || '', at: new Date().toISOString() });
       memory.logHistory({ role: 'assistant', text: res.text || '', tabId: tab.id });
     } catch (err) {
@@ -255,17 +280,19 @@ function wireIPC() {
 // ---------- tray (the Windows "menu bar app") ----------
 function buildTrayMenu() {
   const prov = p => ({ label: settings.provider === p ? `✓ ${p}` : `Use ${p}`, click: () => { settings.provider = p; settingsMod.saveSettings(dataDir, settings); refreshTrayMenu(); } });
+  // His exact menu first (labels/order from AppDelegate.swift), our extras after.
   return Menu.buildFromTemplate([
-    { label: 'Show / Hide Sidebar  (double-tap Shift)', click: () => toggleSidebar() },
-    { label: 'New Chat Tab', click: () => { store.newTab(PROVIDER_DEFAULT_MODEL[settings.provider] || settings.model); showSidebar(); win?.webContents.send('state:patch', store.publicState()); } },
-    { type: 'separator' },
+    { label: 'Toggle Sidebar (Shift Shift)', click: () => toggleSidebar() },
     { label: 'Open Memory Folder', click: () => shell.openPath(memory.memoryDir) },
-    { label: 'Change API Key…', click: () => { showSidebar(); win?.webContents.send('ui:openSettings'); } },
-    { label: 'Settings…', click: () => { showSidebar(); win?.webContents.send('ui:openSettings'); } },
+    { label: 'Open Feedback Folder', click: () => { const dir = path.join(dataDir, 'feedback'); fs.mkdirSync(dir, { recursive: true }); shell.openPath(dir); } },
+    { label: 'Change API Key...', click: () => { showSidebar(); win?.webContents.send('ui:openSettings'); } },
+    { label: 'Set OpenAI API Key...', click: () => { settings.provider = 'openai'; settingsMod.saveSettings(dataDir, settings); showSidebar(); win?.webContents.send('ui:openSettings'); refreshTrayMenu(); } },
     { type: 'separator' },
+    { label: 'New Chat Tab', click: () => { store.newTab(PROVIDER_DEFAULT_MODEL[settings.provider] || settings.model); showSidebar(); win?.webContents.send('state:patch', store.publicState()); } },
+    { label: 'Settings…', click: () => { showSidebar(); win?.webContents.send('ui:openSettings'); } },
     prov('anthropic'), prov('openai'), prov('ollama'),
     { type: 'separator' },
-    { label: 'Quit D Shift', click: () => { app.isQuitting = true; app.quit(); } },
+    { label: 'Quit D-Shift', click: () => { app.isQuitting = true; app.quit(); } },
   ]);
 }
 function refreshTrayMenu() { if (tray) tray.setContextMenu(buildTrayMenu()); }

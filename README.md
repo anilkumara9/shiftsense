@@ -21,6 +21,10 @@ This project started as a full reverse-engineering of [Kylejeong2/d-shift](https
 
 > One honest boundary: Codex *Computer Use* itself lives in the ChatGPT desktop app, not the CLI (see recon/DOCS_RESEARCH.md §3.4). D Shift hands approved tasks to the real `codex exec` agent; it does not fake a Computer Use integration.
 
+## UI parity (v3)
+
+The sidebar UI is a faithful port of his SwiftUI interface — same Theme tokens (surface radius 12, inner 8, black-40% surfaces, white-10% strokes, blue user bubble, 400pt panel), same layout order (tab strip → app header → transcript → queue → usage bar → composer), same components (pixel-grid Thinking row with shimmer, tool chips and groups, Codex task cards with status pills, inline approval cards, exact usage-bar format, queue rows, slash-command menu, history popover, feedback composer, API-key setup screen, text zoom) and the same shortcuts (with Ctrl in place of Cmd). On top of that parity, our additions wear the same visual language: a per-tab model picker in the header, memory and settings buttons in the tab strip, and budget/hook-health details in the usage-bar tooltip and Settings. His AutoMode hint line is present too — but session-only in ours (see `BEAT_SHEET.md` for why his persistent version is a liability, not a feature).
+
 ## How it beats the original
 
 See [`BEAT_SHEET.md`](BEAT_SHEET.md) — 15 concrete wins, each tied to a weakness found in the original's code, including: Windows + cross-platform instead of macOS-only, persistent tabs, a model picker (Claude / OpenAI / local Ollama) instead of a compile-time Claude lock, password-field redaction and a per-app no-read list, memory write audit + **undo**, ranked memory search instead of grep-only, parallel tool execution, transient-error retry instead of full-turn rollback, editable price table + daily budget cap, and launch-at-login.

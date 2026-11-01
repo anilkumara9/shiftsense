@@ -67,7 +67,7 @@ function trimTranscript(tab) {
  *         requestCodexApproval(task)->Promise<{approved, run()}>, usage(tab, usageObj),
  *         callLLM(args)->Promise<anthropicStream result> }
  */
-async function runTurn({ tab, question, host, onText = () => {}, onTool = () => {} }) {
+async function runTurn({ tab, question, images = [], host, onText = () => {}, onTool = () => {} }) {
   const snapshotLen = tab.messages.length;
   const counts = {};
   try {
@@ -75,7 +75,16 @@ async function runTurn({ tab, question, host, onText = () => {}, onTool = () => 
     const memoryBlock = `<memory>\n${overview.me}\n\nMemory files:\n${overview.files.join('\n') || '(none yet)'}\n</memory>`;
     const ctx = await host.getContext(false);
     const screenBlock = ctx && ctx.text ? `<screen app="${ctx.app || ''}" window="${ctx.title || ''}">\n${ctx.text}\n</screen>` : `<screen app="${ctx?.app || ''}" window="${ctx?.title || ''}">(screen text not included — call read_screen if you need it)</screen>`;
-    tab.messages.push({ role: 'user', content: `${screenBlock}\n${memoryBlock}\n\n${question}` });
+    if (images && images.length) {
+      // Attachments ride the first user turn as image blocks (his appshot / paste / drop parity)
+      tab.messages.push({ role: 'user', content: [
+        { type: 'text', text: `${screenBlock}\n${memoryBlock}` },
+        ...images.map(data => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data } })),
+        { type: 'text', text: question },
+      ] });
+    } else {
+      tab.messages.push({ role: 'user', content: `${screenBlock}\n${memoryBlock}\n\n${question}` });
+    }
     for (let iter = 0; iter < MAX_ITER; iter++) {
       trimTranscript(tab);
       const res = await host.callLLM({ messages: tab.messages, tools: toolSchemas(), onText });
@@ -96,7 +105,7 @@ async function runTurn({ tab, question, host, onText = () => {}, onTool = () => 
         if (cap && counts[tu.name] > cap) return { type: 'tool_result', tool_use_id: tu.id, is_error: true, content: `Limit reached for ${tu.name} this question. Answer with what you have.` };
         const invalid = validateToolInput(tu.name, tu.input);
         if (invalid) return { type: 'tool_result', tool_use_id: tu.id, is_error: true, content: invalid };
-        onTool({ name: tu.name, input: tu.input, status: 'running' });
+        onTool({ id: tu.id, name: tu.name, input: tu.input, status: 'running' });
         try {
           let out;
           if (tu.name === 'read_screen') { const s = await host.getContext(true); out = { text: s?.text || '(no accessibility text — the app may need a screenshot)' }; }
@@ -105,12 +114,12 @@ async function runTurn({ tab, question, host, onText = () => {}, onTool = () => 
           else if (tu.name === 'write_memory') { const w = host.memory.write(tu.input.path, tu.input.content, tu.input.mode || 'append'); out = { text: `Saved to ${w.rel}.` }; }
           else if (tu.name === 'use_computer') { const r = await host.requestCodexApproval(tu.input.task); out = { text: r.text }; }
           else out = { text: 'unknown tool' };
-          onTool({ name: tu.name, status: 'done' });
+          onTool({ id: tu.id, name: tu.name, input: tu.input, status: 'done', output: String(out.text || '').slice(0, 2000), image: out.image || null });
           const blocks = [{ type: 'text', text: out.text }];
           if (out.image) blocks.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: out.image } });
           return { type: 'tool_result', tool_use_id: tu.id, content: blocks };
         } catch (e) {
-          onTool({ name: tu.name, status: 'error', error: String(e.message || e) });
+          onTool({ id: tu.id, name: tu.name, input: tu.input, status: 'error', output: String(e.message || e) });
           return { type: 'tool_result', tool_use_id: tu.id, is_error: true, content: String(e.message || e) };
         }
       }));
