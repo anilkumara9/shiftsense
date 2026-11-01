@@ -388,6 +388,7 @@ async function openFeedback() {
 }
 $('#fbCancel').onclick = () => closePops();
 $('#fbSend').onclick = async () => { await window.dshift.feedbackSave($('#fbNote').value, $('#fbInclude').checked ? fbJpeg : null); $('#fbNote').value = ''; closePops(); };
+$('#fbNote').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); $('#fbSend').click(); } }); // his feedback saves on Cmd+Return
 
 async function openSettings() {
   closePops(); const { settings } = await window.dshift.getState(); SETTINGS = settings;
