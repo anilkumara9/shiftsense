@@ -2,35 +2,50 @@
   "author": "D Shift",
   "build": {
     "appId": "app.dshift.sidebar",
+    "asar": true,
+    "asarUnpack": [
+      "native/**"
+    ],
+    "copyright": "Copyright © 2026 D Shift",
     "directories": {
+      "buildResources": "build",
       "output": "dist"
     },
     "files": [
       "main.js",
       "preload.js",
+      "package.json",
       "renderer/**",
+      "!renderer/**/*.map",
       "src/**",
-      "native/**",
-      "package.json"
+      "!src/**/*.map",
+      "native/**"
     ],
     "nsis": {
       "allowToChangeInstallationDirectory": true,
+      "artifactName": "D-Shift-Setup-${version}-${arch}.${ext}",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": false,
       "oneClick": false,
-      "perMachine": false
+      "perMachine": false,
+      "shortcutName": "D Shift"
+    },
+    "portable": {
+      "artifactName": "D-Shift-Portable-${version}-${arch}.${ext}"
     },
     "productName": "D Shift",
     "win": {
-      "artifactName": "D-Shift-${version}-${arch}.${ext}",
+      "icon": "build/icon.ico",
       "target": [
         "nsis",
         "portable"
       ]
-    }
+    },
+    "npmRebuild": false
   },
   "dependencies": {},
-  "description": "D Shift \u2014 a screen-aware AI sidebar for Windows. Double-tap Shift anywhere, ask about what's on your screen. Accessibility-first context, local markdown memory, approval-gated Codex handoff.",
+  "description": "D Shift — a screen-aware AI sidebar for Windows. Double-tap Shift anywhere, ask about what's on your screen. Accessibility-first context, local markdown memory, approval-gated Codex handoff.",
   "devDependencies": {
     "electron": "^33.0.0",
     "electron-builder": "^25.0.0"
@@ -43,11 +58,13 @@
   },
   "scripts": {
     "check": "node --check main.js && node --check preload.js && node --check renderer/renderer.js && for f in src/*.js; do node --check $f || exit 1; done && echo ALL_SYNTAX_OK",
-    "dist:win": "electron-builder --win nsis",
-    "dist:win:portable": "electron-builder --win portable",
-    "start": "electron .",
+    "dist:win": "npm run preflight && electron-builder --win nsis",
+    "dist:win:portable": "npm run preflight && electron-builder --win portable",
+    "icon": "node scripts/make-icon.js",
+    "preflight": "node scripts/preflight.js",
     "shot": "electron tests/ui-shot.js",
+    "start": "electron .",
     "test": "node --test tests/*.test.js"
   },
-  "version": "1.0.0"
+  "version": "1.4.0"
 }

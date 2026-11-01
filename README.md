@@ -71,13 +71,18 @@ Override with the `DSHIFT_DATA_DIR` environment variable. Nothing here is ever c
 ## Tests
 
 ```powershell
-npm test    # 30 tests: detector, memory, context engine, usage/cost, shell
-            # policy, tab persistence, Codex approvals, agent loop + the
-            # regression suites from both production audits (tests/audit*.js)
+npm test    # 99 tests: detector, memory, context engine, usage/cost, shell
+            # policy, tab persistence, Codex approvals, agent loop, both audit
+            # regression suites, plus team suites — UIA host protocol,
+            # security, reliability, AI engine, end-to-end chaos (tests/e2e)
 npm run check
 ```
 
-**Production audits:** this app has been through two adversarial audits of its own — the second one independent (`recon/AUDIT_V1.md`: 2 blockers, 11 majors, ~15 minors, all addressed in v2). The blockers were real: screen context could read the sidebar's own window (fixed with last-external-window tracking), and parallel Codex approvals could deadlock a tab (fixed with a serialized approval queue that always resolves). Verified here: all syntax checks pass, **30/30 tests pass**, the Electron app boots and seeds its data folder, and the agent loop is exercised end-to-end with scripted providers on both API formats. Still honestly unverified without a physical Windows machine: the UIA walk against real apps, the native double-Shift hook, focus behaviour, and the NSIS build — the Day-1 checklist is in `recon/DOCS_RESEARCH.md` §6. Known remaining limitations: cold-PowerShell UIA reads (a persistent host is the next optimization), provider calls don't honour HTTP proxy env vars, and the installer is unsigned until a code-signing certificate exists.
+**Production audits:** this app has been through two adversarial audits of its own — the second one independent (`recon/AUDIT_V1.md`: 2 blockers, 11 majors, ~15 minors, all addressed in v2). The blockers were real: screen context could read the sidebar's own window (fixed with last-external-window tracking), and parallel Codex approvals could deadlock a tab (fixed with a serialized approval queue that always resolves).
+
+**Team build (v1.4.0):** six specialist engineers then hardened it in parallel lanes, each proven by tests: a *persistent UIA host* (screen reads no longer spawn a cold PowerShell each time; the one-shot script remains as fallback), a *security pass* (19 fixes incl. a dangling-symlink write escape, Codex discovery that can no longer be planted via the launch folder, `.cmd`-shim task injection refused, hash-chained tamper-evident audit trails, settings validation), a *reliability pass* (atomic writes, backup + mirror recovery for chats and budget, a 2³¹-token usage-overflow bug fixed), an *AI engine pass* (Anthropic prompt caching, retry/backoff that never double-streams, a 30 s stream watchdog, a per-turn wall-clock budget), a *platform pass* (asar-safe packaging — native scripts unpacked so PowerShell can read them, packaged-file whitelist, generated multi-size icons, a preflight gate that fails builds loudly), and a *QA chaos suite* wiring the real modules together end-to-end.
+
+Verified here: all syntax checks pass, **99/99 tests pass**, preflight passes, the Electron app boots and seeds its data folder, and a Linux package assembly was inspected (whitelist-exact contents, packaged binary boots). Still honestly unverified without a physical Windows machine: the UIA walk against real apps, the native double-Shift hook, focus behaviour, and the actual NSIS build — the Day-1 checklist is in `recon/DOCS_RESEARCH.md` §6. Known remaining limitations: provider calls don't honour HTTP proxy env vars, and the installer is unsigned until a code-signing certificate exists.
 
 ## Layout
 

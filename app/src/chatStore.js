@@ -50,17 +50,59 @@ function repairTranscript(messages) {
   }
   return out;
 }
+/**
+ * Crash-safe replacement of a file with `text`: write to a sibling temp
+ * file, fsync it, then rename over the target. A power loss at any instant
+ * leaves either the complete old file or the complete new one — never a
+ * torn file. (Directory fsync is best-effort: unsupported on Windows.)
+ */
+function writeTmpRename(file, text) {
+  const tmp = `${file}.tmp-${process.pid}`;
+  const fd = fs.openSync(tmp, 'w');
+  try { fs.writeFileSync(fd, text); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+  fs.renameSync(tmp, file);
+  try { const dfd = fs.openSync(path.dirname(file), 'r'); try { fs.fsyncSync(dfd); } finally { fs.closeSync(dfd); } } catch { /* ignore */ }
+}
+/**
+ * Write `text` as the new content of `file`, first rotating the previous
+ * on-disk payload into `<file>.bak` (only if it still parses — never back
+ * up garbage). load paths fall back to the .bak when the main file is
+ * unparseable, so one bad write can never silently erase user state.
+ */
+function atomicWriteJson(file, text) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  try {
+    const prev = fs.readFileSync(file, 'utf8');
+    JSON.parse(prev); // throws on garbage -> skip rotation
+    writeTmpRename(file + '.bak', prev);
+  } catch { /* no previous good payload */ }
+  writeTmpRename(file, text);
+}
 class ChatStore {
   constructor(dataDir, priceOverrides = {}) {
     this.file = path.join(dataDir, 'chats.json');
     this.priceOverrides = priceOverrides;
     this.tabs = []; this.activeId = null;
+    this._lastSaved = null; // dirty-check: payload string last successfully written by save()
+    /** Set when load() had to recover state from a .bak file; the
+     *  coordinator can log/surface this (recovery is never silent). */
+    this.recoveryInfo = { chatsFromBackup: false, archiveFromBackup: false };
     this.load();
     if (!this.tabs.length) this.newTab();
   }
+  /** Read+parse `file`; on any failure retry `<file>.bak`. Returns { data, fromBackup } or null. */
+  _readJsonWithBackup(file) {
+    try { return { data: JSON.parse(fs.readFileSync(file, 'utf8')), fromBackup: false }; } catch { /* try backup */ }
+    try { return { data: JSON.parse(fs.readFileSync(file + '.bak', 'utf8')), fromBackup: true }; } catch { /* try mirror */ }
+    // Mirror = the latest successfully saved payload (closes the first-write
+    // gap .bak rotation leaves, same pattern as the spend ledger).
+    try { return { data: JSON.parse(fs.readFileSync(file + '.mirror', 'utf8')), fromBackup: true }; } catch { return null; }
+  }
   load() {
-    try {
-      const j = JSON.parse(fs.readFileSync(this.file, 'utf8'));
+    const res = this._readJsonWithBackup(this.file);
+    if (!res) { this.tabs = []; this.activeId = null; return; }
+    {
+      const j = res.data || {};
       this.tabs = (j.tabs || []).map(t => {
         // migrate v1 files where display entries were mixed into messages
         const mixed = Array.isArray(t.messages) ? t.messages : [];
@@ -69,7 +111,14 @@ class ChatStore {
         return { id: t.id, title: t.title, model: t.model, messages, display, queue: Array.isArray(t.queue) ? t.queue : [], usage: UsageStats.fromJSON(t.usage, this.priceOverrides), createdAt: t.createdAt };
       });
       this.activeId = j.activeId && this.tabs.some(t => t.id === j.activeId) ? j.activeId : (this.tabs[0]?.id || null);
-    } catch { this.tabs = []; this.activeId = null; }
+    }
+    if (res.fromBackup) {
+      this.recoveryInfo.chatsFromBackup = true;
+      // Heal: rewrite the main file from the recovered in-memory state so the
+      // next launch doesn't depend on the backup. Rotation inside save()
+      // skips unparseable payloads, so the good .bak is not overwritten.
+      try { this.save(); } catch { /* state survives in memory regardless */ }
+    }
   }
   /** Coalesced save for hot paths (per-request usage updates mid-turn). */
   saveSoon() {
@@ -79,10 +128,11 @@ class ChatStore {
   }
   save() {
     const payload = { v: 2, activeId: this.activeId, tabs: this.tabs.map(t => ({ id: t.id, title: t.title, model: t.model, messages: stripImages(t.messages), display: t.display, queue: t.queue, usage: t.usage.toJSON(), createdAt: t.createdAt })) };
-    const tmp = this.file + '.tmp';
-    fs.mkdirSync(path.dirname(this.file), { recursive: true });
-    fs.writeFileSync(tmp, JSON.stringify(payload));
-    fs.renameSync(tmp, this.file);
+    const text = JSON.stringify(payload);
+    if (text === this._lastSaved) return; // dirty-check: payload unchanged since last successful write
+    atomicWriteJson(this.file, text);
+    try { atomicWriteJson(this.file + '.mirror', text); } catch { /* mirror is best-effort redundancy */ }
+    this._lastSaved = text;
   }
   newTab(model) {
     const tab = { id: newId(), title: 'New chat', model: model || 'claude-sonnet-5-5', messages: [], display: [], queue: [], usage: new UsageStats(model, this.priceOverrides), createdAt: new Date().toISOString() };
@@ -91,8 +141,13 @@ class ChatStore {
   }
   get(id) { return this.tabs.find(t => t.id === (id || this.activeId)) || this.tabs[0]; }
   archiveFile() { return path.join(path.dirname(this.file), 'archive.json'); }
-  readArchive() { try { return JSON.parse(fs.readFileSync(this.archiveFile(), 'utf8')); } catch { return []; } }
-  writeArchive(list) { try { fs.writeFileSync(this.archiveFile(), JSON.stringify(list.slice(0, 200))); } catch { /* best effort */ } }
+  readArchive() {
+    const res = this._readJsonWithBackup(this.archiveFile());
+    if (!res) return [];
+    if (res.fromBackup) this.recoveryInfo.archiveFromBackup = true;
+    return Array.isArray(res.data) ? res.data : [];
+  }
+  writeArchive(list) { try { atomicWriteJson(this.archiveFile(), JSON.stringify(list.slice(0, 200))); } catch { /* best effort */ } }
   /** Closed chats with content are archived (his ChatArchive) so History can reopen them. */
   archiveTab(tab) {
     if (!tab.display?.length) return;
@@ -130,4 +185,4 @@ class ChatStore {
     return { activeId: this.activeId, tabs: this.tabs.map(t => ({ id: t.id, title: t.title, model: t.model, display: t.display, queue: t.queue, usage: t.usage.snapshot() })) };
   }
 }
-module.exports = { ChatStore, stripImages, repairTranscript };
+module.exports = { ChatStore, stripImages, repairTranscript, atomicWriteJson, writeTmpRename };

@@ -13,22 +13,34 @@
  */
 const ALLOWED = new Set(['rg','grep','egrep','fgrep','find','ls','cat','head','tail','wc','tree','file','stat','sort','uniq','cut','du']);
 const FORBIDDEN_CHARS = /[;&`$<>\n\\(){}|]/;           // note: | also banned — pipelines are split & checked per segment by callers if enabled
-const FORBIDDEN_FLAGS = ['-exec','-execdir','-ok','-okdir','-delete','-fprint','-fprintf','-fls','--pre','-delete'];
+const CONTROL_CHARS = /[\u0000-\u0008\u000B-\u001F\u007F]/; // SEC-P2: \r and friends are token boundaries to some shells, not to ours — ambiguity is banned
+const FORBIDDEN_FLAGS = ['-exec','-execdir','-ok','-okdir','-delete','-fprint','-fprintf','-fls','--pre'];
 function segmentOk(segment) {
   const parts = segment.trim().split(/\s+/).filter(Boolean);
   if (!parts.length) return false;
-  if (!ALLOWED.has(parts[0])) return false;
+  const cmd = parts[0];
+  if (!ALLOWED.has(cmd)) return false;
+  let positional = 0;
   for (const a of parts.slice(1)) {
-    if (FORBIDDEN_FLAGS.includes(a) || FORBIDDEN_FLAGS.some(f => a.startsWith(f + '='))) return false;
+    if (FORBIDDEN_FLAGS.includes(a) || FORBIDDEN_FLAGS.some(f => a.startsWith(f) || a.startsWith(f + '='))) return false;
     if (a.startsWith('/') || a === '~' || a.startsWith('~/')) return false;
+    if (/^[A-Za-z]:/.test(a)) return false; // SEC-P2: Windows drive paths (C:/…, C:…) are absolute on the target platform
+    if (a.startsWith('--output')) return false; // no allowlisted read-only tool has a benign --output
+    // SEC-P1: sort and tree can WRITE a file via -o/--output, including inside
+    // a combined short-flag cluster (`sort -ro out.md`). ls -o is benign and
+    // ls is not in this branch.
+    if ((cmd === 'sort' || cmd === 'tree') && /^-[A-Za-z]*o/.test(a)) return false;
     if (a.split('/').includes('..')) return false;
     if (/^-[a-zA-Z]*\//.test(a) || /^--[\w-]+=\//.test(a)) return false; // flag-attached path
+    if (!a.startsWith('-')) positional++;
   }
+  // SEC-P1: uniq's optional second positional argument is an OUTPUT file.
+  if (cmd === 'uniq' && positional > 1) return false;
   return true;
 }
 function isReadOnlyWithinFolder(command) {
   if (typeof command !== 'string' || !command.trim() || command.length > 2000) return false;
-  if (FORBIDDEN_CHARS.test(command)) return false;
+  if (FORBIDDEN_CHARS.test(command) || CONTROL_CHARS.test(command)) return false;
   if (command.includes('&&') || command.includes('||')) return false;
   return segmentOk(command);
 }

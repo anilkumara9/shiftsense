@@ -61,7 +61,15 @@ class UsageStats {
   toJSON() { return { ...this.snapshot(), priceOverrides: undefined }; }
   static fromJSON(j, priceOverrides = {}) {
     const u = new UsageStats(j?.model || 'claude-sonnet-5-5', priceOverrides);
-    if (j) { u.input = j.input|0; u.output = j.output|0; u.cacheRead = j.cacheRead|0; u.cacheWrite = j.cacheWrite|0; u.requests = j.requests|0; u.lastRequestTotal = j.lastRequestTotal|0; u.screenshots = j.screenshots|0; u.screenReads = j.screenReads|0; }
+    if (j) {
+      // Exact round-trip: keep finite numbers AS-IS. The old `|0` coercion
+      // silently wrapped counts past 2^31 negative (3000000000|0 < 0) and
+      // truncated fractions — cumulative counters on a long-lived tab can
+      // pass 2^31 input tokens, which corrupted cost/context after reload.
+      const num = v => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : 0; };
+      u.input = num(j.input); u.output = num(j.output); u.cacheRead = num(j.cacheRead); u.cacheWrite = num(j.cacheWrite);
+      u.requests = num(j.requests); u.lastRequestTotal = num(j.lastRequestTotal); u.screenshots = num(j.screenshots); u.screenReads = num(j.screenReads);
+    }
     return u;
   }
 }

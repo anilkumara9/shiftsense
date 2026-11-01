@@ -26,6 +26,11 @@ const { anthropicStream, openaiStream, resolveModel } = require('./src/llm');
 const { runTurn, SYSTEM_PROMPT } = require('./src/agent');
 const { SpendLedger, costOf } = require('./src/spend');
 const { ApprovalQueue } = require('./src/approvalQueue');
+const { UiaClient } = require('./src/uiaClient');
+// Packaged builds keep native scripts OUTSIDE app.asar (powershell.exe cannot
+// read inside an archive) — translate the path (platform lane's catch).
+const nativePath = name => path.join(__dirname, 'native', name).replace(/app\.asar([\\/])/, 'app.asar.unpacked$1');
+const uia = new UiaClient({ hostPath: nativePath('uia-host.ps1') });
 
 const dataDir = defaultDataDir();
 const memory = new MemoryStore(dataDir).seed();
@@ -125,10 +130,13 @@ function startShiftHook() {
 // sidebar is hidden; at send time we use the tracked snapshot, so the
 // sidebar having focus can never contaminate the answer.
 let lastExternal = { raw: null, value: { app: '', title: '', text: '', mode: 'none' }, hash: null, at: 0 };
-function runUIA() {
+async function runUIA() {
+  if (process.platform !== 'win32') return null;
+  // Fast path: the persistent UIA host (one warm PowerShell, ~tens of ms).
+  if (uia.healthy) { const warm = await uia.dump().catch(() => null); if (warm) return warm; }
+  // Fallback: the original one-shot script.
   return new Promise(resolve => {
-    if (process.platform !== 'win32') return resolve(null);
-    execFile('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, 'native', 'uia-dump.ps1')],
+    execFile('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', nativePath('uia-dump.ps1')],
       { timeout: 6000, maxBuffer: 16 * 1024 * 1024, windowsHide: true }, (err, stdout) => {
         if (err) return resolve(null);
         try { resolve(JSON.parse(stdout)); } catch { resolve(null); }
@@ -243,7 +251,13 @@ function wireIPC() {
 
   ipcMain.handle('chat:send', async (e, tabId, question, attachments = []) => {
     const tab = store.get(tabId); if (!tab) throw new Error('no tab');
-    if (ledger.exceeded(settings.budgetUSDPerDay || 0)) { e.sender.send('chat:error', { tabId: tab.id, error: `Daily budget cap reached ($${(settings.budgetUSDPerDay).toFixed(2)}; spent $${ledger.spentToday().toFixed(2)} today). Raise it in Settings.` }); return store.publicState(); }
+    // Race-safe budget gate (reliability lane's reserve/settle): reserve an
+    // estimate for the turn so two tabs sending at once can't both slip past
+    // the cap; actuals are added per request in onUsage; release at turn end.
+    const cap = settings.budgetUSDPerDay || 0;
+    const reservation = cap > 0 ? ledger.reserve(0.25) : null;
+    if (reservation && ledger.wouldExceed(cap, reservation)) { ledger.release(reservation); e.sender.send('chat:error', { tabId: tab.id, error: `Daily budget cap reached ($${cap.toFixed(2)}; spent $${ledger.spentToday().toFixed(2)} today). Raise it in Settings.` }); return store.publicState(); }
+    if (ledger.exceeded(cap)) { if (reservation) ledger.release(reservation); e.sender.send('chat:error', { tabId: tab.id, error: `Daily budget cap reached ($${cap.toFixed(2)}; spent $${ledger.spentToday().toFixed(2)} today). Raise it in Settings.` }); return store.publicState(); }
     const atts = Array.isArray(attachments) ? attachments.filter(a => a && a.jpegBase64) : [];
     store.addDisplay(tab, { role: 'user', text: question, at: new Date().toISOString(), attachments: atts.map(a => a.dataUrl).filter(Boolean) });
     memory.logHistory({ role: 'user', text: question, tabId: tab.id });
@@ -259,8 +273,8 @@ function wireIPC() {
         if (!codexDetected.found) return { text: 'Codex CLI is not installed, so the task was not run. Tell the user.' };
         let req;
         try { req = codex.requestApproval(task); } catch (err) { return { text: String(err.message || err) }; }
-        const approved = sessionAuto ? true : await approvals.ask(req); // serialized; always resolves (B2). Session auto skips the card but never the audit log.
-        if (!approved) { codex.deny(req.approvalId); return { text: 'The user did not approve this computer task (denied, timed out, or stopped). Do not retry it.' }; }
+        const verdict = sessionAuto ? { ok: true, reason: 'allowed' } : await approvals.askDetailed(req); // serialized; always resolves (B2). Session auto skips the card but never the audit log.
+        if (!verdict.ok) { codex.deny(req.approvalId, verdict.reason === 'timeout' ? 'approval timed out' : verdict.reason === 'cancelled' ? 'cancelled by user (Stop)' : 'denied by user'); return { text: 'The user did not approve this computer task (denied, timed out, or stopped). Do not retry it.' }; }
         const r = await codex.approve(req.approvalId, codexDetected.path, txt => e.sender.send('codex:progress', { approvalId: req.approvalId, text: txt }));
         return { text: r.text };
       },
@@ -271,6 +285,8 @@ function wireIPC() {
       memory.logHistory({ role: 'assistant', text: res.text || '', tabId: tab.id });
     } catch (err) {
       e.sender.send('chat:error', { tabId: tab.id, error: String(err.message || err) });
+    } finally {
+      if (reservation) ledger.release(reservation); // actuals already added per request
     }
     store.save();
     return store.publicState();
@@ -308,6 +324,10 @@ function createTray() {
 
 if (gotLock) {
   app.whenReady().then(async () => {
+    // Recovery is never silent (reliability lane): surface it in the log + settings.
+    if (store.recoveryInfo.chatsFromBackup) console.warn('[dshift] chats were recovered from a backup file (the main chats file was damaged)');
+    if (store.recoveryInfo.archiveFromBackup) console.warn('[dshift] chat archive was recovered from a backup file');
+    if (ledger.recoveredFromBackup) console.warn('[dshift] today\'s spend ledger was recovered from a backup file');
     createWindow(); wireIPC(); createTray(); startShiftHook(); startContextTracker();
     refreshExternal().catch(() => {});
     codexDetected = await codex.detect().catch(() => ({ found: false }));

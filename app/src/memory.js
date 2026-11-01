@@ -19,12 +19,30 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
+const MAX_WRITE_CHARS = 1_000_000; // SEC-M4: a single write can never bloat disk/context without bound
+const AUDIT_GENESIS = 'dshift-memory-audit-v1';
+let snapCounter = 0;
+const sha256 = s => crypto.createHash('sha256').update(String(s)).digest('hex');
 
 function defaultDataDir(env = process.env) {
   if (env.DSHIFT_DATA_DIR) return path.resolve(env.DSHIFT_DATA_DIR.replace(/^~(?=$|\/|\\)/, os.homedir()));
   return path.join(os.homedir(), 'DShift');
 }
 const ME_GUARD_CHARS = 8000;
+
+/**
+ * Crash-safe replacement of a file's content: sibling temp file + fsync +
+ * rename, so a power loss mid-write leaves the complete old or new content,
+ * never a torn file. Used for memory files and .versions snapshots alike
+ * (a torn snapshot would make undo restore garbage).
+ */
+function atomicWriteText(file, text) {
+  const tmp = `${file}.tmp-${process.pid}`;
+  const fd = fs.openSync(tmp, 'w');
+  try { fs.writeFileSync(fd, text); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+  fs.renameSync(tmp, file);
+}
 
 class MemoryStore {
   constructor(dataDir = defaultDataDir()) {
@@ -44,19 +62,37 @@ class MemoryStore {
     if (!fs.existsSync(notes)) fs.writeFileSync(notes, '# Notes\n\n<!-- Small durable facts D Shift learns about you land here. Edit or delete anything. -->\n');
     return this;
   }
-  /** Resolve a user/model-supplied relative path safely inside memoryDir. Throws on escape. */
+  /** Resolve a user/model-supplied relative path safely inside memoryDir. Throws on escape.
+   *  SEC-M1/M2 hardening: walks EVERY component with lstat, so a symlink is
+   *  caught even when it dangles (target not yet created — the old probe used
+   *  existsSync, which follows links and reports a dangling link as "missing",
+   *  letting writeFileSync create the file OUTSIDE through the link). Internal
+   *  dot-components (.versions, .audit.jsonl, …) are refused outright: they are
+   *  the store's own machinery, never user/model content. */
   resolveInside(rel) {
-    if (typeof rel !== 'string' || !rel) throw new Error('path required');
+    if (typeof rel !== 'string' || !rel || rel.includes('\0')) throw new Error('path required');
     if (path.isAbsolute(rel) || rel.startsWith('~')) throw new Error('absolute paths are not allowed');
-    const target = path.resolve(this.memoryDir, rel);
     const root = fs.existsSync(this.memoryDir) ? fs.realpathSync(this.memoryDir) : path.resolve(this.memoryDir);
-    // resolve the parent chain to catch symlink escapes on the final component too
-    let probe = target;
-    while (!fs.existsSync(probe) && probe !== path.dirname(probe)) probe = path.dirname(probe);
-    const realProbe = fs.existsSync(probe) ? fs.realpathSync(probe) : probe;
-    const rebuilt = path.join(realProbe, path.relative(probe, target));
-    if (rebuilt !== root && !rebuilt.startsWith(root + path.sep)) throw new Error('path escapes the memory folder');
-    return rebuilt;
+    const target = path.resolve(this.memoryDir, rel);
+    const relParts = path.relative(this.memoryDir, target).split(path.sep).filter(Boolean);
+    if (!relParts.length) throw new Error('path required');
+    if (relParts.includes('..')) throw new Error('path escapes the memory folder');
+    if (relParts.some(p => p.startsWith('.'))) throw new Error('internal dot paths are not accessible');
+    let cur = root;
+    for (let i = 0; i < relParts.length; i++) {
+      cur = path.join(cur, relParts[i]);
+      let st = null;
+      try { st = fs.lstatSync(cur); } catch { /* does not exist yet: the rest is lexical and cannot hide a link */ }
+      if (!st) { cur = path.join(cur, ...relParts.slice(i + 1)); break; }
+      if (st.isSymbolicLink()) {
+        let real;
+        try { real = fs.realpathSync(cur); } catch { throw new Error('dangling symlink in memory path'); }
+        if (real !== root && !real.startsWith(root + path.sep)) throw new Error('path escapes the memory folder');
+        cur = real; // continue the walk from the resolved location
+      }
+    }
+    if (cur !== root && !cur.startsWith(root + path.sep)) throw new Error('path escapes the memory folder');
+    return cur;
   }
   listFiles(limit = 200) {
     const out = [];
@@ -101,37 +137,86 @@ class MemoryStore {
     }
     return results.sort((a, b) => b.score - a.score).slice(0, limit);
   }
+  /** Snapshot key for a file. SEC-M3: the old `a/b.md` -> `a__b.md` flattening
+   *  collided with a real file literally named `a__b.md`, so undo could restore
+   *  the WRONG file's content. base64url of the normalized rel is injective. */
+  snapSuffix(rel) { return `__${Buffer.from(String(rel).replace(/\\/g, '/'), 'utf8').toString('base64url')}`; }
+  /** Append one hash-chained audit entry (SEC-M5: tamper-evident trail). */
+  _appendAudit(entry) {
+    let tip = AUDIT_GENESIS;
+    try {
+      const lines = fs.readFileSync(this.auditFile, 'utf8').trim().split('\n').filter(Boolean);
+      const last = JSON.parse(lines[lines.length - 1]); if (last && last.h) tip = last.h;
+    } catch { /* no audit file yet */ }
+    const stored = { ...entry, prev: tip };
+    stored.h = sha256(JSON.stringify(stored));
+    fs.appendFileSync(this.auditFile, JSON.stringify(stored) + '\n');
+  }
+  /** Verify the audit hash chain. Entries written before chaining existed
+   *  (no `h`) are accepted as a legacy prefix only. */
+  verifyAudit() {
+    let lines = [];
+    try { lines = fs.readFileSync(this.auditFile, 'utf8').trim().split('\n').filter(Boolean); } catch { return { ok: true, entries: 0, brokenAt: null }; }
+    let prev = AUDIT_GENESIS, chained = false;
+    for (let i = 0; i < lines.length; i++) {
+      let e; try { e = JSON.parse(lines[i]); } catch { return { ok: false, entries: lines.length, brokenAt: i }; }
+      if (!e.h) { if (chained) return { ok: false, entries: lines.length, brokenAt: i }; continue; }
+      chained = true;
+      const { h, ...rest } = e;
+      if (e.prev !== prev || sha256(JSON.stringify(rest)) !== h) return { ok: false, entries: lines.length, brokenAt: i };
+      prev = h;
+    }
+    return { ok: true, entries: lines.length, brokenAt: null };
+  }
   /** Write with audit + undo snapshot. mode: 'append' (default) | 'replace'. Only .md files. */
   write(rel, content, mode = 'append', source = 'model') {
     if (!/\.md$/i.test(rel)) throw new Error('only .md files can be written');
+    if (String(content).length > MAX_WRITE_CHARS) throw new Error(`memory write too large (max ${MAX_WRITE_CHARS} chars)`);
     const target = this.resolveInside(rel);
     fs.mkdirSync(path.dirname(target), { recursive: true });
+    // TOCTOU mitigation: re-resolve after creating directories; a swapped-in
+    // symlink between check and write changes the answer and aborts the write.
+    if (this.resolveInside(rel) !== target) throw new Error('path changed during write');
+    fs.mkdirSync(this.versionsDir, { recursive: true });
     const existed = fs.existsSync(target);
     const prev = existed ? fs.readFileSync(target, 'utf8') : '';
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const snapName = `${stamp}__${rel.replace(/[\\/]/g, '__')}`;
+    const suffix = this.snapSuffix(rel);
+    const snapName = `${stamp}-${++snapCounter}${suffix}`;
     if (existed) {
-      fs.writeFileSync(path.join(this.versionsDir, snapName), prev);
+      atomicWriteText(path.join(this.versionsDir, snapName), prev);
       // cap undo history per file at 20 snapshots (audit minor: unbounded growth)
-      const mine = fs.readdirSync(this.versionsDir).filter(f => f.endsWith(`__${rel.replace(/[\\/]/g, '__')}`)).sort();
+      const mine = fs.readdirSync(this.versionsDir).filter(f => f.endsWith(suffix)).sort();
       for (const old of mine.slice(0, Math.max(0, mine.length - 20))) { try { fs.unlinkSync(path.join(this.versionsDir, old)); } catch { /* ignore */ } }
     }
     const next = mode === 'replace' ? String(content) : (prev + (prev && !prev.endsWith('\n') ? '\n' : '') + String(content));
-    fs.writeFileSync(target, next);
-    fs.appendFileSync(this.auditFile, JSON.stringify({ ts: new Date().toISOString(), rel, mode, source, bytes: Buffer.byteLength(String(content)), snapshot: existed ? snapName : null }) + '\n');
+    atomicWriteText(target, next);
+    this._appendAudit({ ts: new Date().toISOString(), rel, mode, source, bytes: Buffer.byteLength(String(content)), contentHash: sha256(next), snapshot: existed ? snapName : null });
     return { rel, snapshot: existed ? snapName : null, chars: next.length };
   }
   /** Undo the most recent write to a file (restore its latest snapshot). */
   undoLastWrite(rel) {
-    const snaps = fs.readdirSync(this.versionsDir).filter(f => f.endsWith(`__${rel.replace(/[\\/]/g, '__')}`)).sort();
+    const suffix = this.snapSuffix(rel);
+    const snaps = fs.readdirSync(this.versionsDir).filter(f => f.endsWith(suffix)).sort();
     if (!snaps.length) return false;
     const latest = snaps[snaps.length - 1];
-    fs.copyFileSync(path.join(this.versionsDir, latest), this.resolveInside(rel));
-    fs.appendFileSync(this.auditFile, JSON.stringify({ ts: new Date().toISOString(), rel, mode: 'undo', source: 'user', snapshot: latest }) + '\n');
+    const target = this.resolveInside(rel);
+    const restored = fs.readFileSync(path.join(this.versionsDir, latest), 'utf8');
+    atomicWriteText(target, restored);
+    this._appendAudit({ ts: new Date().toISOString(), rel, mode: 'undo', source: 'user', snapshot: latest, contentHash: sha256(restored) });
     return true;
   }
   audit(limit = 50) {
-    try { return fs.readFileSync(this.auditFile, 'utf8').trim().split('\n').filter(Boolean).slice(-limit).map(l => JSON.parse(l)); } catch { return []; }
+    // Tolerant per-line parse: a crash mid-append can leave ONE torn final
+    // line; that must not blank the whole trail (previously any bad line
+    // made audit() return [] via the outer catch).
+    let raw; try { raw = fs.readFileSync(this.auditFile, 'utf8'); } catch { return []; }
+    const out = [];
+    for (const line of raw.split('\n')) {
+      if (!line.trim()) continue;
+      try { out.push(JSON.parse(line)); } catch { /* torn line: skip it, keep the rest */ }
+    }
+    return out.slice(-limit);
   }
   logHistory(entry) {
     const day = new Date().toISOString().slice(0, 10);

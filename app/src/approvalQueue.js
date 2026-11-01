@@ -15,23 +15,26 @@ class ApprovalQueue {
     this.chain = Promise.resolve(); this.pending = new Set(); this.generation = 0;
   }
   /** Returns a promise that ALWAYS resolves to boolean. Never rejects, never hangs. */
-  ask(payload) {
+  ask(payload) { return this.askDetailed(payload).then(r => r.ok); }
+  /** Like ask(), but reports WHY: 'allowed' | 'denied' | 'timeout' | 'cancelled'
+   *  so audit trails don't mislabel a timeout as a user denial. */
+  askDetailed(payload) {
     const gen = this.generation;
     const run = () => new Promise(resolve => {
       let timer = null;
-      const entry = { finish: ok => { this.pending.delete(entry); if (timer) clearTimeout(timer); resolve(!!ok); } };
-      if (gen !== this.generation) { entry.finish(false); return; } // cancelled while queued
-      timer = setTimeout(() => entry.finish(false), this.timeoutMs);
+      const entry = { finish: (ok, reason) => { this.pending.delete(entry); if (timer) clearTimeout(timer); resolve({ ok: !!ok, reason: reason || (ok ? 'allowed' : 'denied') }); } };
+      if (gen !== this.generation) { entry.finish(false, 'cancelled'); return; } // cancelled while queued
+      timer = setTimeout(() => entry.finish(false, 'timeout'), this.timeoutMs);
       if (timer.unref) timer.unref();
       this.pending.add(entry);
-      try { this.present(payload, entry.finish); } catch { entry.finish(false); }
+      try { this.present(payload, entry.finish); } catch { entry.finish(false, 'denied'); }
     });
     const p = this.chain.then(run, run);
-    this.chain = p.catch(() => {});
+    this.chain = p.catch(() => ({ ok: false, reason: 'denied' }));
     return p;
   }
   /** Stop pressed / app quitting: resolve everything outstanding as denied. */
-  cancelAll() { this.generation++; for (const e of [...this.pending]) e.finish(false); }
+  cancelAll() { this.generation++; for (const e of [...this.pending]) e.finish(false, 'cancelled'); }
   get size() { return this.pending.size; }
 }
 module.exports = { ApprovalQueue };

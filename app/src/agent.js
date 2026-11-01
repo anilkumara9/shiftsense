@@ -12,6 +12,12 @@
  */
 const MAX_ITER = 12;
 const CAPS = { take_screenshot: 1, read_screen: 3, use_computer: 3 };
+/** Per-turn wall-clock soft budget: a turn that keeps calling tools can
+ *  otherwise burn all 12 iterations over many minutes. Past the budget we
+ *  stop starting NEW model calls and return the best text so far with a
+ *  note — the transcript is left valid (it always ends on a user message
+ *  at that point), so no rollback is needed. */
+const TURN_BUDGET_MS = 240000;
 const SYSTEM_PROMPT = `You are D Shift, a screen-aware sidebar assistant on Windows.
 You answer questions about what is on the user's screen and remember them over time.
 Rules:
@@ -67,9 +73,11 @@ function trimTranscript(tab) {
  *         requestCodexApproval(task)->Promise<{approved, run()}>, usage(tab, usageObj),
  *         callLLM(args)->Promise<anthropicStream result> }
  */
-async function runTurn({ tab, question, images = [], host, onText = () => {}, onTool = () => {} }) {
+async function runTurn({ tab, question, images = [], host, onText = () => {}, onTool = () => {}, turnBudgetMs = TURN_BUDGET_MS, nowImpl = Date.now }) {
   const snapshotLen = tab.messages.length;
   const counts = {};
+  const startedAt = nowImpl();
+  let lastText = '';
   try {
     const overview = host.memory.overview();
     const memoryBlock = `<memory>\n${overview.me}\n\nMemory files:\n${overview.files.join('\n') || '(none yet)'}\n</memory>`;
@@ -86,8 +94,13 @@ async function runTurn({ tab, question, images = [], host, onText = () => {}, on
       tab.messages.push({ role: 'user', content: `${screenBlock}\n${memoryBlock}\n\n${question}` });
     }
     for (let iter = 0; iter < MAX_ITER; iter++) {
+      if (nowImpl() - startedAt > turnBudgetMs) {
+        const note = `(Stopped early: this turn passed its ${Math.round(turnBudgetMs / 1000)}-second budget, so this is the best answer available so far. Ask a narrower question or say "continue" to keep going.)`;
+        return { ok: true, text: lastText ? `${lastText}\n\n${note}` : note, budgetExceeded: true };
+      }
       trimTranscript(tab);
       const res = await host.callLLM({ messages: tab.messages, tools: toolSchemas(), onText });
+      if (res.text) lastText = res.text;
       if (res.usage) host.onUsage?.(res.usage);
       // Prefer the provider's verbatim content blocks (keeps thinking blocks
       // + signatures intact for the next request); fall back to rebuilding.
@@ -131,4 +144,4 @@ async function runTurn({ tab, question, images = [], host, onText = () => {}, on
     throw e;
   }
 }
-module.exports = { runTurn, toolSchemas, validateToolInput, SYSTEM_PROMPT, MAX_ITER, CAPS, trimTranscript, MAX_TRANSCRIPT_MSGS };
+module.exports = { runTurn, toolSchemas, validateToolInput, SYSTEM_PROMPT, MAX_ITER, CAPS, trimTranscript, MAX_TRANSCRIPT_MSGS, TURN_BUDGET_MS };
