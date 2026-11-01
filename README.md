@@ -1,112 +1,380 @@
-# D Shift — for Windows (the beat-him rebuild)
+# ShiftSense
 
-A screen-aware AI sidebar for **Windows**. Double-tap **Shift** anywhere, ask a question, and the model answers using what's on your screen plus a local memory of who you are.
+**A screen-aware AI sidebar for Windows.**
 
-This project started as a full reverse-engineering of [Kylejeong2/d-shift](https://github.com/Kylejeong2/d-shift) — a macOS-only Swift app — and rebuilds it natively for Windows, feature for feature, then goes past it. The complete recon is in [`recon/RECON_REPORT.md`](recon/RECON_REPORT.md) (every file, every constant, every weakness) and the docs research behind the Windows design is in [`recon/DOCS_RESEARCH.md`](recon/DOCS_RESEARCH.md).
+Double-tap **Shift** anywhere on your PC, ask a question, and ShiftSense answers using the app on your screen, your local markdown memory, and the AI provider you choose. It stays lightweight in the system tray, opens without stealing focus, and closes with **Esc**.
 
-## What you asked for — and where it lives
+[![Release](https://img.shields.io/github/v/release/anilkumara9/shiftsense)](https://github.com/anilkumara9/shiftsense/releases)
+[![CI](https://github.com/anilkumara9/shiftsense/actions/workflows/ci.yml/badge.svg)](https://github.com/anilkumara9/shiftsense/actions/workflows/ci.yml)
+[![Stars](https://img.shields.io/github/stars/anilkumara9/shiftsense)](https://github.com/anilkumara9/shiftsense/stargazers)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Windows%2010%20%2F%2011-blue.svg)](#prerequisites)
 
-| Requirement | Implementation |
+---
+
+## Overview
+
+ShiftSense is built for quick questions while you work. Instead of switching to a browser tab and re-explaining what you are looking at, you open the sidebar, ask naturally, and get an answer grounded in the current window.
+
+It reads the screen through Windows UI Automation first, uses a screenshot only when the accessible text is not enough, and keeps your long-term memory as plain markdown files that you can open, edit, back up, or delete at any time.
+
+## Features
+
+### Sidebar experience
+
+- Double-tap **Shift** to open the sidebar from anywhere.
+- Translucent floating panel that appears over your current app.
+- Does not steal focus while peeking; click into the composer when you want to type.
+- **Esc** closes the sidebar.
+- Fallback shortcut: **Ctrl+Shift+Space**.
+- Multiple chat tabs with persistent history.
+- Per-tab token, cache, context and estimated cost stats.
+- System tray controls for showing/hiding the app, opening memory, changing provider, and updating settings.
+
+### Screen understanding
+
+- Accessibility-first context using Windows UI Automation.
+- Reads the foreground app window, focused element, selected text, controls, labels and visible text.
+- Hard caps keep screen context fast and predictable.
+- Screenshot fallback is limited and used only when the UI Automation tree is missing, too thin, or the model explicitly needs visual context.
+- Password values are never read.
+- Sensitive apps can be placed on a no-read list.
+
+### Local memory
+
+- Memory is stored as normal markdown files.
+- Default location: `~/DShift/memory/`.
+- Includes `me.md`, `notes.md`, `people/` and `projects/`.
+- Ranked in-app memory search.
+- Model memory writes are audit-logged and undoable.
+- You can edit every memory file in any text editor.
+
+### Providers and cost control
+
+- Anthropic Claude models.
+- OpenAI models.
+- Ollama for local models and offline chat.
+- Per-tab model selection.
+- Editable pricing table.
+- Daily budget tracking with reserve/settle protection for concurrent tabs.
+- Streaming safeguards: retry handling, stall watchdog and a per-turn time budget.
+
+### Optional computer-use handoff
+
+- Optional Codex CLI handoff for approved tasks.
+- Every task requires explicit approval.
+- Approvals expire after 2 minutes.
+- No persistent always-allow mode.
+- Tasks run with a scrubbed environment and an audit trail.
+
+### Reliability and safety
+
+- Crash-safe local state using atomic writes, backups and mirror recovery.
+- Tamper-evident, hash-chained audit logs for memory writes and Codex tasks.
+- Settings validation and encrypted in-app API key storage using Windows DPAPI.
+- Test suite covers the agent loop, memory, approvals, screen context, security rules, persistence, provider streaming and end-to-end failure cases.
+
+---
+
+## Download and install
+
+### Option 1: Install the release build
+
+1. Open the latest release: <https://github.com/anilkumara9/shiftsense/releases/latest>
+2. Download the Windows installer, currently named like:
+
+   ```text
+   D-Shift-Setup-1.5.0-x64.exe
+   ```
+
+3. Run the installer.
+4. Launch ShiftSense from the Start menu or system tray.
+5. Double-tap **Shift** to open the sidebar.
+
+> The installer is not code-signed yet. If Windows SmartScreen appears, confirm that you downloaded the file from the official GitHub release page, then choose **More info → Run anyway** if you trust the source.
+
+### Option 2: Run from source
+
+Use this option for development or if you want to inspect and modify the code before running it.
+
+#### Prerequisites
+
+| Requirement | Notes |
 |---|---|
-| Double-tap Shift anywhere to open | Low-level global key hook (`uiohook-napi`) feeding a hardened detector (tap <250 ms, two taps <400 ms, typing capitals / held Shift / other modifiers never trigger) — `src/doubleShift.js`. Fallback shortcut Ctrl+Shift+Space always on. |
-| Floats over other apps, doesn't steal focus | Frameless transparent always-on-top window, shown with `showInactive()`; it's non-focusable in peek mode and only takes key focus when you click in to type — `main.js` |
-| Translucent, lightweight | Acrylic-style backdrop blur, one small window, no bundled model, no database |
-| Esc closes | Global Esc registration while visible; closing the last tab also hides it |
-| Answers from your screen, accessibility first | Windows **UI Automation** tree of the foreground window via `native/uia-dump.ps1` (3,000 nodes / 60k chars caps, focused element marked, selected text included). Screenshot only when the tree is thin/missing or the model asks — max 1 per question |
-| Local memory in plain markdown, easy to open/edit | `~/DShift/memory/` — `me.md`, `notes.md`, `people/`, `projects/` — plus an in-app editor, a tray "Open Memory Folder" item, and Settings showing the exact path |
-| Multiple chat tabs | Ctrl+T / + button, Ctrl+W closes; **tabs, messages and usage persist across restarts** |
-| Token & cost stats | Per-tab bar: context %, input/output tokens, cache hit rate, estimated $ cost, screen reads, screenshots |
-| Menu-bar app for settings | On Windows that's the **system tray** app: Show/Hide, New Tab, Open Memory Folder, Change API Key, provider switch, Quit |
-| Codex computer-use handoff, approval only | Per-task approval card, 2-minute expiry, **no "always allow" mode**, read-only sandbox, full audit log — `src/codex.js` |
+| Windows 10 or Windows 11 | Required for the packaged Windows experience, UI Automation and DPAPI key storage. |
+| Node.js 20 or newer | Required to run from source and to build the installer. |
+| npm | Included with Node.js. |
+| Git | Required only for cloning the repository. |
+| An AI provider | Anthropic key, OpenAI key, or Ollama installed locally. |
+| Codex CLI | Optional. Required only for the approval-gated computer-use handoff. |
 
-> One honest boundary: Codex *Computer Use* itself lives in the ChatGPT desktop app, not the CLI (see recon/DOCS_RESEARCH.md §3.4). D Shift hands approved tasks to the real `codex exec` agent; it does not fake a Computer Use integration.
-
-## UI parity (v3)
-
-The sidebar UI is a faithful port of his SwiftUI interface — same Theme tokens (surface radius 12, inner 8, black-40% surfaces, white-10% strokes, blue user bubble, 400pt panel), same layout order (tab strip → app header → transcript → queue → usage bar → composer), same components (pixel-grid Thinking row with shimmer, tool chips and groups, Codex task cards with status pills, inline approval cards, exact usage-bar format, queue rows, slash-command menu, history popover, feedback composer, API-key setup screen, text zoom) and the same shortcuts (with Ctrl in place of Cmd). On top of that parity, our additions wear the same visual language: a per-tab model picker in the header, memory and settings buttons in the tab strip, and budget/hook-health details in the usage-bar tooltip and Settings. His AutoMode hint line is present too — but session-only in ours (see `BEAT_SHEET.md` for why his persistent version is a liability, not a feature).
-
-## How it beats the original
-
-See [`BEAT_SHEET.md`](BEAT_SHEET.md) — 15 concrete wins, each tied to a weakness found in the original's code, including: Windows + cross-platform instead of macOS-only, persistent tabs, a model picker (Claude / OpenAI / local Ollama) instead of a compile-time Claude lock, password-field redaction and a per-app no-read list, memory write audit + **undo**, ranked memory search instead of grep-only, parallel tool execution, transient-error retry instead of full-turn rollback, editable price table + daily budget cap, and launch-at-login.
-
-## Run it (Windows)
+#### Clone and start
 
 ```powershell
+git clone https://github.com/anilkumara9/shiftsense.git
+cd shiftsense
 npm install
 npm start
 ```
 
-1. On first run a tray icon appears. Double-tap **Shift** (or Ctrl+Shift+Space) to open the sidebar.
-2. Open ⚙️ Settings, paste your Anthropic (or OpenAI) key, Save. The key is stored **encrypted with Windows DPAPI** (`safeStorage`) — never in plain text. Or set `ANTHROPIC_API_KEY` in the environment / `.env`.
-3. No key? Switch the provider to **Ollama** in the tray menu and run a local model — free, fully offline for chat (screen text still stays on your machine in that mode).
+On first launch, look for the ShiftSense tray icon. Double-tap **Shift** or press **Ctrl+Shift+Space** to open the sidebar.
 
-### Build the installer
+---
+
+## Configuration
+
+ShiftSense works without a `.env` file. The recommended setup is to paste your API key inside the app Settings, where it is stored as Windows DPAPI ciphertext.
+
+### API key resolution order
+
+ShiftSense checks for provider keys in this order:
+
+1. Real environment variables.
+2. `./.env` in the project folder.
+3. `~/.config/dshift/.env`.
+4. The encrypted in-app key saved from Settings.
+
+### Provider setup
+
+| Provider | What to configure | Notes |
+|---|---|---|
+| Anthropic | `ANTHROPIC_API_KEY` or the in-app Anthropic key field | Default provider. Get a key from the Anthropic Console. |
+| OpenAI | `OPENAI_API_KEY` or the in-app OpenAI key field | Switch the provider in Settings or from the tray menu. |
+| Ollama | No API key | Install Ollama, pull a model, then switch the provider to Ollama in the app. |
+
+### Optional `.env` setup
+
+Copy the example file if you prefer file-based configuration:
 
 ```powershell
-npm run dist:win          # NSIS installer into dist/
-npm run dist:win:portable # single portable .exe
+Copy-Item .env.example .env
+notepad .env
 ```
 
-## Where your data lives
+Example:
 
+```dotenv
+ANTHROPIC_API_KEY=sk-ant-...
+# OPENAI_API_KEY=sk-...
+# DSHIFT_DATA_DIR=C:\Users\you\Documents\ShiftSense
 ```
+
+Never commit a real `.env` file. The repository ignores it, and the packaging preflight blocks key-like files from being included in builds.
+
+### Change the data folder
+
+By default, ShiftSense stores local data in:
+
+```text
+~/DShift
+```
+
+To use a different folder, set `DSHIFT_DATA_DIR` before launching the app:
+
+```powershell
+$env:DSHIFT_DATA_DIR = "C:\Users\you\Documents\ShiftSense"
+npm start
+```
+
+For an installed build, set the variable in Windows Environment Variables and restart ShiftSense.
+
+---
+
+## How to use
+
+| Action | How |
+|---|---|
+| Open the sidebar | Double-tap **Shift** or press **Ctrl+Shift+Space**. |
+| Close the sidebar | Press **Esc**. |
+| Ask about the current app | Open the sidebar and type your question. ShiftSense attaches screen context automatically. |
+| Open a new tab | Use the **+** button or **Ctrl+T**. |
+| Close a tab | Use the tab close button or **Ctrl+W**. |
+| Reopen a previous chat | Use the history control in the sidebar. |
+| Open memory | Use the memory button, the tray menu, or `/memory`. |
+| Copy the last answer | Use `/copy`. |
+| Clear the current chat | Use `/clear`. |
+| Toggle session auto mode | Use `/auto`. This lasts for the current session only. |
+| See available commands | Use `/help`. |
+
+Useful questions to try:
+
+- "Summarize what is on this page."
+- "What is this error and how do I fix it?"
+- "Draft a reply to this email."
+- "Compare the options visible in this window."
+- "Remember that this project uses the staging API."
+
+---
+
+## Data, privacy and security
+
+ShiftSense is local-first. Your memory, chat history, settings and audit files stay on your machine unless you send a question to a configured cloud provider.
+
+### Local data layout
+
+```text
 ~/DShift/
-├── memory/     me.md · notes.md · people/ · projects/   (+ .audit.jsonl, .versions/ for undo)
-├── history/    YYYY-MM-DD.jsonl  (append-only chat log, for you — never sent back to the model)
-├── chats.json  your tabs, restored on launch
-├── settings.json (API keys only as DPAPI ciphertext)
-└── codex/      audit.jsonl + last-run-stderr.log
+├── memory/
+│   ├── me.md
+│   ├── notes.md
+│   ├── people/
+│   ├── projects/
+│   ├── .audit.jsonl
+│   └── .versions/
+├── history/
+├── chats.json
+├── chats.json.bak
+├── chats.json.mirror
+├── settings.json
+├── spend.json
+└── codex/
 ```
 
-Override with the `DSHIFT_DATA_DIR` environment variable. Nothing here is ever committed — see `.gitignore`.
+### What leaves your machine
 
-## Privacy
+When you ask a question using Anthropic or OpenAI, ShiftSense sends the prompt, the relevant screen context, the `me.md` memory excerpt and the memory file list to that provider. If a screenshot is needed, that screenshot is also sent for that question.
 
-- Memory and history never leave your machine.
-- Screen context is sent to the model provider only when you ask a question (the accessibility text, or one screenshot if needed) along with `me.md` + the memory file list.
-- Password fields are never read. Apps on the no-read list (1Password, KeePass, Bitwarden, LastPass, Dashlane by default — edit in settings) are never read at all.
-- Every memory write by the model is logged and undoable. Every Codex task needs your click, and the Codex subprocess gets **none** of your API keys in its environment.
+When you use Ollama, chat runs against your local model. Screen text stays on your machine in that mode unless you separately choose a cloud-backed tool or provider.
 
-## Tests
+### Built-in protections
+
+- Password fields are redacted and never emitted as values.
+- Apps on the no-read list are not read.
+- Memory writes are confined to the memory folder.
+- Memory writes are size-capped, audit-logged and undoable.
+- Codex tasks require approval and receive a scrubbed environment without provider API keys.
+- API keys saved in the app are encrypted with Windows DPAPI.
+- Local state files use atomic writes with backup and mirror recovery.
+
+For vulnerability reporting and the security model, see [SECURITY.md](SECURITY.md).
+
+---
+
+## Development
+
+### Common commands
+
+| Command | Purpose |
+|---|---|
+| `npm start` | Run the app in development. |
+| `npm run check` | Syntax-check the main process, preload, renderer, source and scripts. |
+| `npm test` | Run the full test suite. |
+| `npm run stress` | Run the heavy-load stress suite. |
+| `npm run preflight` | Run packaging safety and completeness checks. |
+| `npm run icon` | Regenerate the app icons. |
+| `npm run shot` | Capture a local UI screenshot for development checks. |
+| `npm run dist:win` | Build the Windows NSIS installer into `dist/`. |
+| `npm run dist:win:portable` | Build a portable Windows executable into `dist/`. |
+
+### Project structure
+
+```text
+├── main.js                 Electron main process: window, tray, shortcuts, IPC and key storage
+├── preload.js              Secure renderer bridge with context isolation
+├── renderer/               Sidebar user interface
+├── src/                    Tested application core
+│   ├── agent.js            Tool loop and turn orchestration
+│   ├── approvalQueue.js    Serialized user approvals
+│   ├── chatStore.js        Tabs, transcripts, archive and crash-safe persistence
+│   ├── codex.js            Approval-gated Codex handoff
+│   ├── contextEngine.js    UI Automation tree serialization and safety caps
+│   ├── doubleShift.js      Double-tap Shift detection state machine
+│   ├── llm.js              Anthropic, OpenAI and Ollama streaming clients
+│   ├── memory.js           Markdown memory store, search, audit chain and undo
+│   ├── settings.js         Settings validation and API key resolution
+│   ├── shellPolicy.js      Defence-in-depth shell policy
+│   ├── spend.js            Daily budget ledger
+│   ├── uiaClient.js        Persistent UI Automation host client
+│   └── usage.js            Token, cache and cost accounting
+├── native/                 PowerShell UI Automation readers for Windows
+├── tests/                  Unit, security, reliability and end-to-end tests
+├── scripts/                Check, test, stress, preflight, icon and screenshot tools
+├── docs/                   Architecture, memory and tool documentation
+├── build/                  Application icons
+├── .github/                Issue templates, pull request template and GitHub Actions workflows
+├── .env.example            Documented environment variable template
+├── CHANGELOG.md            Release history
+├── CONTRIBUTING.md         Development rules and contribution guide
+└── SECURITY.md             Security model and reporting process
+```
+
+More detail:
+
+- [Architecture](docs/architecture.md)
+- [Memory](docs/memory.md)
+- [Tools](docs/tools.md)
+- [Contributing](CONTRIBUTING.md)
+- [Changelog](CHANGELOG.md)
+
+### Build the Windows installer locally
 
 ```powershell
-npm test    # 99 tests: detector, memory, context engine, usage/cost, shell
-            # policy, tab persistence, Codex approvals, agent loop, both audit
-            # regression suites, plus team suites — UIA host protocol,
-            # security, reliability, AI engine, end-to-end chaos (tests/e2e)
-npm run check
+npm install
+npm test
+npm run preflight
+npm run dist:win
 ```
 
-**Production audits:** this app has been through two adversarial audits of its own — the second one independent (`recon/AUDIT_V1.md`: 2 blockers, 11 majors, ~15 minors, all addressed in v2). The blockers were real: screen context could read the sidebar's own window (fixed with last-external-window tracking), and parallel Codex approvals could deadlock a tab (fixed with a serialized approval queue that always resolves).
+The installer is written to `dist/`.
 
-**Team build (v1.4.0):** six specialist engineers then hardened it in parallel lanes, each proven by tests: a *persistent UIA host* (screen reads no longer spawn a cold PowerShell each time; the one-shot script remains as fallback), a *security pass* (19 fixes incl. a dangling-symlink write escape, Codex discovery that can no longer be planted via the launch folder, `.cmd`-shim task injection refused, hash-chained tamper-evident audit trails, settings validation), a *reliability pass* (atomic writes, backup + mirror recovery for chats and budget, a 2³¹-token usage-overflow bug fixed), an *AI engine pass* (Anthropic prompt caching, retry/backoff that never double-streams, a 30 s stream watchdog, a per-turn wall-clock budget), a *platform pass* (asar-safe packaging — native scripts unpacked so PowerShell can read them, packaged-file whitelist, generated multi-size icons, a preflight gate that fails builds loudly), and a *QA chaos suite* wiring the real modules together end-to-end.
+### Release process
 
-Verified here: all syntax checks pass, **99/99 tests pass**, preflight passes, the Electron app boots and seeds its data folder, and a Linux package assembly was inspected (whitelist-exact contents, packaged binary boots). Still honestly unverified without a physical Windows machine: the UIA walk against real apps, the native double-Shift hook, focus behaviour, and the actual NSIS build — the Day-1 checklist is in `recon/DOCS_RESEARCH.md` §6. Known remaining limitations: provider calls don't honour HTTP proxy env vars, and the installer is unsigned until a code-signing certificate exists.
+Releases are built by GitHub Actions on a Windows runner. Pushing a version tag such as `v1.5.0` runs the test suite, packaging preflight and installer build, then publishes the GitHub release with the generated `.exe` attached.
 
-## Repository layout
+---
 
-```
-├── main.js              Electron main: window, tray, global double-Shift hook, IPC, DPAPI key store
-├── preload.js           sandboxed bridge (contextIsolation, no Node in the renderer)
-├── src/                 the tested core (14 modules)
-│   ├── doubleShift.js     hardened double-tap detector (state machine)
-│   ├── contextEngine.js   UIA tree serializer: caps, password redaction, denylist, tree diffing
-│   ├── uiaClient.js       persistent UIA host client (warm PowerShell, restart, timeout)
-│   ├── memory.js          markdown memory: ranked search, write audit (hash-chained), undo
-│   ├── chatStore.js       tabs: display/API transcript split, archive, atomic + backup + mirror saves
-│   ├── usage.js · spend.js  token/cache/cost stats · race-safe daily budget ledger
-│   ├── agent.js           tool loop: caps, parallel tools, rollback, per-turn wall-clock budget
-│   ├── llm.js             Anthropic + OpenAI streaming: prompt caching, retry, stall watchdog
-│   ├── codex.js           approval-gated Codex handoff (audit-chained, env-scrubbed)
-│   ├── approvalQueue.js   serialized approvals — every request resolves, none can deadlock
-│   ├── settings.js        validated settings + .env discovery
-│   └── shellPolicy.js     read-only shell allowlist (defence in depth)
-├── native/              uia-host.ps1 (persistent reader) · uia-dump.ps1 (one-shot fallback)
-├── renderer/            the sidebar UI — a faithful port of the original's interface (see recon/UI_SPEC.md)
-├── tests/               99 tests: unit, both audit regression suites, security, reliability,
-│                        AI engine, UIA protocol, and the end-to-end chaos suite
-├── scripts/             preflight.js (build gate) · make-icon.js (icon generator)
-├── build/               generated app icons (icon.png / icon.ico)
-└── recon/               RECON_REPORT.md (file-by-file teardown of the original) · DOCS_RESEARCH.md
-                         UI_SPEC.md · AUDIT_V1.md · UI_PARITY_SHOT.png
-```
+## Troubleshooting
+
+### The sidebar does not open
+
+- Check that ShiftSense is running in the system tray.
+- Try the fallback shortcut: **Ctrl+Shift+Space**.
+- Click the tray icon and use **Show/Hide**.
+- Restart the app if the global hook stopped responding.
+
+### The app asks for an API key
+
+- Paste an Anthropic or OpenAI key in Settings, or
+- create a `.env` file from `.env.example`, or
+- switch the provider to Ollama for local models.
+
+### Answers do not include screen context
+
+- Make sure the target app is the foreground window before opening ShiftSense.
+- Some apps expose very little UI Automation text; ShiftSense may need the screenshot fallback.
+- Check whether the app is on the no-read list in Settings.
+- Password managers and protected windows may intentionally expose no readable content.
+
+### Ollama does not respond
+
+- Confirm Ollama is running locally.
+- Confirm at least one model is installed.
+- Select Ollama as the provider in ShiftSense Settings or the tray menu.
+
+### Codex handoff is unavailable
+
+- Install the Codex CLI separately.
+- Make sure it is available from a normal absolute install location or PATH entry.
+- Remember that each computer-use task still needs your approval inside ShiftSense.
+
+### The installer shows a SmartScreen warning
+
+The current installer is unsigned. Only continue if the file came from the official ShiftSense GitHub release page and the filename/version match the release you intended to download.
+
+---
+
+## Contributing
+
+Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request, and keep the project rules intact: approvals must always resolve, screen context must never read the sidebar itself, memory writes must stay inside the memory folder, persisted state must be crash-safe, and placeholder/demo features do not ship.
+
+## License
+
+Released under the [MIT License](LICENSE).
+
+---
+
+## ⭐ Star progress
+
+If ShiftSense is useful to you, please star the repository. Stars help other Windows users discover the project and make it easier to track real adoption over time.
+
+[![Star History Chart](https://api.star-history.com/svg?repos=anilkumara9/shiftsense&type=Date)](https://star-history.com/#anilkumara9/shiftsense&Date)
