@@ -22,8 +22,15 @@ jobs:
         run: npm test
       - name: Preflight (fails the release if anything would leak or is missing)
         run: npm run preflight
-      - name: Build installer + portable
-        run: npm run dist:win
+      - name: Build installer
+        # --publish never is load-bearing: on a tag build electron-builder
+        # auto-detects the GitHub remote and tries to publish by itself,
+        # failing without a GH_TOKEN and racing the explicit publish step
+        # below. The installer build itself succeeded in run 41337577989;
+        # only the auto-publish failed. This workflow publishes via gh.
+        run: |
+          npm run preflight
+          npx electron-builder --win nsis --publish never
       - name: Extract release notes from CHANGELOG.md
         shell: pwsh
         run: |
