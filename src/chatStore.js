@@ -69,13 +69,27 @@ function writeTmpRename(file, text) {
  * up garbage). load paths fall back to the .bak when the main file is
  * unparseable, so one bad write can never silently erase user state.
  */
-function atomicWriteJson(file, text) {
+function atomicWriteJson(file, text, knownPrev = null) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  try {
-    const prev = fs.readFileSync(file, 'utf8');
-    JSON.parse(prev); // throws on garbage -> skip rotation
-    writeTmpRename(file + '.bak', prev);
-  } catch { /* no previous good payload */ }
+  // Fast rotation: when the caller knows the exact payload it last wrote
+  // (ChatStore.save tracks it), verify by size and rotate with a rename —
+  // O(1) instead of re-reading, re-parsing and re-writing the whole previous
+  // payload on every save (the stress pass measured that at ~4 full writes +
+  // 2 full parses per save). A crash between the rename and the new write
+  // leaves main missing with .bak holding the previous payload, which load()
+  // already recovers from. Unknown/mismatched state falls back to the
+  // read+parse path, which never backs up garbage.
+  let rotated = false;
+  if (knownPrev != null) {
+    try { if (fs.statSync(file).size === Buffer.byteLength(knownPrev)) { fs.renameSync(file, file + '.bak'); rotated = true; } } catch { /* fall through */ }
+  }
+  if (!rotated) {
+    try {
+      const prev = fs.readFileSync(file, 'utf8');
+      JSON.parse(prev); // throws on garbage -> skip rotation
+      writeTmpRename(file + '.bak', prev);
+    } catch { /* no previous good payload */ }
+  }
   writeTmpRename(file, text);
 }
 class ChatStore {
@@ -130,8 +144,10 @@ class ChatStore {
     const payload = { v: 2, activeId: this.activeId, tabs: this.tabs.map(t => ({ id: t.id, title: t.title, model: t.model, messages: stripImages(t.messages), display: t.display, queue: t.queue, usage: t.usage.toJSON(), createdAt: t.createdAt })) };
     const text = JSON.stringify(payload);
     if (text === this._lastSaved) return; // dirty-check: payload unchanged since last successful write
-    atomicWriteJson(this.file, text);
-    try { atomicWriteJson(this.file + '.mirror', text); } catch { /* mirror is best-effort redundancy */ }
+    atomicWriteJson(this.file, text, this._lastSaved);
+    // The mirror IS a backup — it gets a plain atomic write, not its own
+    // backup rotation (that churn doubled the cost of every save).
+    try { writeTmpRename(this.file + '.mirror', text); } catch { /* mirror is best-effort redundancy */ }
     this._lastSaved = text;
   }
   newTab(model) {

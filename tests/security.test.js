@@ -20,17 +20,21 @@ const { isReadOnlyWithinFolder } = require('../src/shellPolicy');
 const codex = require('../src/codex');
 
 /* ---------- memory ---------- */
-test('SEC-M1: write through a DANGLING symlink cannot escape the memory folder', () => {
+function trySymlink(target, link, t) {
+  try { fs.symlinkSync(target, link); return true; }
+  catch (e) { if (e.code === 'EPERM' || e.code === 'ENOTSUP') { t.skip(`symlinks unavailable here (${e.code}) — needs Developer Mode/admin on Windows`); return false; } throw e; }
+}
+test('SEC-M1: write through a DANGLING symlink cannot escape the memory folder', t => {
   const dir = tmp(); const m = new MemoryStore(dir).seed();
   const outside = path.join(dir, 'outside.md');
-  fs.symlinkSync(outside, path.join(m.memoryDir, 'link.md')); // target does not exist yet
+  if (!trySymlink(outside, path.join(m.memoryDir, 'link.md'), t)) return; // target does not exist yet
   assert.throws(() => m.write('link.md', 'pwned', 'replace'), /symlink|escapes/);
   assert.equal(fs.existsSync(outside), false); // nothing was written outside
 });
-test('SEC-M1b: read through a symlink to an existing outside file is refused', () => {
+test('SEC-M1b: read through a symlink to an existing outside file is refused', t => {
   const dir = tmp(); const m = new MemoryStore(dir).seed();
   const outside = path.join(dir, 'secret.md'); fs.writeFileSync(outside, 'TOP SECRET');
-  fs.symlinkSync(outside, path.join(m.memoryDir, 'peek.md'));
+  if (!trySymlink(outside, path.join(m.memoryDir, 'peek.md'), t)) return;
   assert.throws(() => m.readFile('peek.md'), /escapes/);
 });
 test('SEC-M2: model/user writes cannot reach internal dot-dirs (.versions, .audit)', () => {

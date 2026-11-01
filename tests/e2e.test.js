@@ -569,3 +569,4 @@ test('e2e cost truth: per-tab cost and ledger total match hand-computed values t
   assert.equal(reloaded.exceeded(6.98), true);
   assert.equal(reloaded.exceeded(6.99), false);
 });
+
