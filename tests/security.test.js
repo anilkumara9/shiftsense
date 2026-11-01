@@ -149,7 +149,12 @@ test('SEC-C1: PATH resolution never sources binaries from cwd or the app dir', (
   fs.writeFileSync(path.join(binDir, fname), win ? '@echo off\r\n' : '#!/bin/sh\n');  // legit PATH entry
   const env = { PATH: [cwdDir, binDir].join(path.delimiter), ...(win ? { PATHEXT: '.CMD;.EXE;.BAT' } : {}) };
   const found = codex.resolveOnPath('codex', { env, platform: process.platform, cwd: cwdDir, execDir: appDir });
-  assert.equal(found, path.join(binDir, fname)); // skipped the cwd plant
+  // On win32 the returned extension case follows PATHEXT as configured on
+  // the machine (.CMD on GitHub runners) — same file on a case-insensitive
+  // filesystem; compare normalized there, strictly elsewhere.
+  const expected = path.join(binDir, fname);
+  if (win) assert.equal(String(found).toLowerCase(), expected.toLowerCase());
+  else assert.equal(found, expected); // skipped the cwd plant
   const env2 = { PATH: cwdDir, ...(win ? { PATHEXT: '.CMD;.EXE;.BAT' } : {}) };
   assert.equal(codex.resolveOnPath('codex', { env: env2, platform: process.platform, cwd: cwdDir, execDir: appDir }), null);
 });
