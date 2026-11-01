@@ -136,16 +136,22 @@ test('SEC-P2: Windows drive paths and control chars fail the policy', () => {
 
 /* ---------- codex ---------- */
 test('SEC-C1: PATH resolution never sources binaries from cwd or the app dir', () => {
+  // Simulates the HOST platform: this test previously hardcoded posix
+  // semantics with host-native paths, which fails on Windows hosts even
+  // though resolveOnPath itself is correct (found by the first Windows CI
+  // run). On win32 the resolvable file is codex.cmd per PATHEXT.
   const base = tmp();
   const cwdDir = path.join(base, 'cwd'); const appDir = path.join(base, 'appdir'); const binDir = path.join(base, 'bin');
   for (const d of [cwdDir, appDir, binDir]) fs.mkdirSync(d);
-  fs.writeFileSync(path.join(cwdDir, 'codex'), '#!/bin/sh\n'); // planted in cwd
-  fs.writeFileSync(path.join(binDir, 'codex'), '#!/bin/sh\n');  // legit PATH entry
-  const env = { PATH: [cwdDir, binDir].join(path.delimiter) };
-  const found = codex.resolveOnPath('codex', { env, platform: 'linux', cwd: cwdDir, execDir: appDir });
-  assert.equal(found, path.join(binDir, 'codex')); // skipped the cwd plant
-  const env2 = { PATH: cwdDir };
-  assert.equal(codex.resolveOnPath('codex', { env: env2, platform: 'linux', cwd: cwdDir, execDir: appDir }), null);
+  const win = process.platform === 'win32';
+  const fname = win ? 'codex.cmd' : 'codex';
+  fs.writeFileSync(path.join(cwdDir, fname), win ? '@echo off\r\n' : '#!/bin/sh\n'); // planted in cwd
+  fs.writeFileSync(path.join(binDir, fname), win ? '@echo off\r\n' : '#!/bin/sh\n');  // legit PATH entry
+  const env = { PATH: [cwdDir, binDir].join(path.delimiter), ...(win ? { PATHEXT: '.CMD;.EXE;.BAT' } : {}) };
+  const found = codex.resolveOnPath('codex', { env, platform: process.platform, cwd: cwdDir, execDir: appDir });
+  assert.equal(found, path.join(binDir, fname)); // skipped the cwd plant
+  const env2 = { PATH: cwdDir, ...(win ? { PATHEXT: '.CMD;.EXE;.BAT' } : {}) };
+  assert.equal(codex.resolveOnPath('codex', { env: env2, platform: process.platform, cwd: cwdDir, execDir: appDir }), null);
 });
 test('SEC-C1b: detect() never falls back to a bare (PATH/cwd-resolved) name', async () => {
   const dir = tmp();
