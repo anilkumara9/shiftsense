@@ -30,20 +30,22 @@ $proc = $null; try { $proc = Get-Process -Id $pid32 -ErrorAction Stop } catch {}
 $root = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
 
 $script:count = 0
+function Truncate($s) { if ($null -eq $s) { return $s }; $str = [string]$s; if ($str.Length -gt 500) { return $str.Substring(0, 500) }; return $str }
 function Convert-El($el, $depth) {
   if ($null -eq $el -or $script:count -ge $MaxNodes -or $depth -gt $MaxDepth) { return $null }
   $script:count++
-  $c = $el.Current
+  # One stale/dead element must not kill the whole dump (audit M3): guard .Current
+  try { $c = $el.Current } catch { return $null }
   $node = [ordered]@{}
   $node.type = $c.ControlType.ProgrammaticName -replace '^ControlType\.', ''
-  $node.name = $c.Name
+  $node.name = Truncate $c.Name
   $node.isPassword = $c.IsPassword
   $r = $c.BoundingRectangle
   if ($r.Width -gt 0 -and $r.Height -gt 0) { $node.rect = @([int]$r.X, [int]$r.Y, [int]$r.Width, [int]$r.Height) }
   try { $node.focused = $el -eq [System.Windows.Automation.AutomationElement]::FocusedElement } catch { $node.focused = $false }
   if (-not $c.IsPassword) {
     $vp = $null
-    if ($el.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) { $node.value = $vp.Current.Value }
+    if ($el.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) { $node.value = Truncate $vp.Current.Value }
     else {
       $tp = $null
       if ($el.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern, [ref]$tp)) {
@@ -66,4 +68,5 @@ $tree = Convert-El $root 0
 if ($script:count -lt 10) { Start-Sleep -Milliseconds 500; $script:count = 0; $tree = Convert-El $root 0 }
 if ($script:selected) { $tree.selectedText = $script:selected }
 $out = [ordered]@{ app = if ($proc) { $proc.ProcessName } else { '' }; title = $root.Current.Name; pid = [int]$pid32; root = $tree }
-Write-Output ($out | ConvertTo-Json -Depth 64 -Compress)
+# Depth must exceed the walk depth's JSON nesting or deep trees truncate (audit M3)
+Write-Output ($out | ConvertTo-Json -Depth 100 -Compress)

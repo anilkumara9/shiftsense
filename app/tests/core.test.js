@@ -104,10 +104,10 @@ test('shell policy: allows read-only, refuses chaining/writes/escapes', () => {
 const { ChatStore } = require('../src/chatStore');
 test('chatstore: tabs persist across restart, last-tab close hides sidebar', () => {
   const dir = tmp(); const a = new ChatStore(dir); const t = a.get();
-  a.addMessage(t, { role: 'user', text: 'hello world this is a long first message' });
+  a.addDisplay(t, { role: 'user', text: 'hello world this is a long first message' });
   t.usage.record({ input: 10, output: 5 }); a.save();
   const b = new ChatStore(dir); const t2 = b.get();
-  assert.equal(t2.messages.length, 1); assert.equal(t2.usage.input, 10); assert.match(t2.title, /hello world/);
+  assert.equal(t2.display.length, 1); assert.equal(t2.messages.length, 0); assert.equal(t2.usage.input, 10); assert.match(t2.title, /hello world/);
   assert.deepEqual(b.closeTab(t2.id), { closed: true, hideSidebar: true });
 });
 

@@ -67,12 +67,13 @@ Override with the `DSHIFT_DATA_DIR` environment variable. Nothing here is ever c
 ## Tests
 
 ```powershell
-npm test    # 18 tests: detector, memory, context engine, usage/cost,
-            # shell policy, tab persistence, Codex approval gate, agent loop
+npm test    # 30 tests: detector, memory, context engine, usage/cost, shell
+            # policy, tab persistence, Codex approvals, agent loop + the
+            # regression suites from both production audits (tests/audit*.js)
 npm run check
 ```
 
-Verified in this repo: all syntax checks pass, **18/18 tests pass**, the Electron app boots and seeds its data folder, and the full agent loop (screen → tools → memory → answer, screenshot cap, rollback on failure) is exercised end-to-end with a scripted model. The UIA PowerShell script and the Windows packaging run on Windows — they are syntax-reviewed and follow the patterns in `recon/DOCS_RESEARCH.md` §2, but a physical Windows pass (focus-steal click test, UIA wake matrix) is the honest remaining verification item.
+**Production audits:** this app has been through two adversarial audits of its own — the second one independent (`recon/AUDIT_V1.md`: 2 blockers, 11 majors, ~15 minors, all addressed in v2). The blockers were real: screen context could read the sidebar's own window (fixed with last-external-window tracking), and parallel Codex approvals could deadlock a tab (fixed with a serialized approval queue that always resolves). Verified here: all syntax checks pass, **30/30 tests pass**, the Electron app boots and seeds its data folder, and the agent loop is exercised end-to-end with scripted providers on both API formats. Still honestly unverified without a physical Windows machine: the UIA walk against real apps, the native double-Shift hook, focus behaviour, and the NSIS build — the Day-1 checklist is in `recon/DOCS_RESEARCH.md` §6. Known remaining limitations: cold-PowerShell UIA reads (a persistent host is the next optimization), provider calls don't honour HTTP proxy env vars, and the installer is unsigned until a code-signing certificate exists.
 
 ## Layout
 

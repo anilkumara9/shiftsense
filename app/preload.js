@@ -17,6 +17,6 @@ contextBridge.exposeInMainWorld('dshift', {
   saveSettings: patch => ipcRenderer.invoke('settings:save', patch),
   setKey: (provider, key) => ipcRenderer.invoke('settings:key', provider, key),
   detectCodex: () => ipcRenderer.invoke('codex:detect'),
-  codexDecision: (approvalId, approved) => ipcRenderer.send('codex:decision', approvalId, approved),
+  codexDecision: approved => ipcRenderer.send('codex:decision', approved),
   on: (channel, fn) => ipcRenderer.on(channel, (_e, data) => fn(data)),
 });

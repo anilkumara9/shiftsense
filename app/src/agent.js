@@ -38,6 +38,31 @@ function validateToolInput(name, input) {
   return null;
 }
 /**
+ * Transcript windowing (audit M9): every turn used to append up to 60k chars
+ * of screen text FOREVER, guaranteeing an eventual "prompt too long" 400 and
+ * an ever-heavier chats.json. Keep the first turn (identity/context anchor)
+ * plus the most recent messages, and never orphan a tool_result whose
+ * tool_use was trimmed (an orphan is another 400).
+ */
+const MAX_TRANSCRIPT_MSGS = 24;
+function trimTranscript(tab) {
+  const msgs = tab.messages;
+  if (!Array.isArray(msgs) || msgs.length <= MAX_TRANSCRIPT_MSGS) return;
+  const head = msgs.slice(0, 1);
+  let tail = msgs.slice(-(MAX_TRANSCRIPT_MSGS - 1));
+  const survivingToolIds = new Set();
+  for (const m of tail) if (m.role === 'assistant' && Array.isArray(m.content)) for (const b of m.content) if (b.type === 'tool_use') survivingToolIds.add(b.id);
+  tail = tail.filter(m => {
+    if (m.role === 'user' && Array.isArray(m.content) && m.content.some(b => b.type === 'tool_result')) {
+      return m.content.every(b => b.type !== 'tool_result' || survivingToolIds.has(b.tool_use_id));
+    }
+    return true;
+  });
+  // a leading assistant message in tail whose user prompt was trimmed is fine;
+  // a leading tool_result user message was filtered above.
+  tab.messages = [...head, ...tail];
+}
+/**
  * host: { memory, getScreen(force)->{text,...}, takeScreenshot(scope)->{text,jpegBase64},
  *         requestCodexApproval(task)->Promise<{approved, run()}>, usage(tab, usageObj),
  *         callLLM(args)->Promise<anthropicStream result> }
@@ -52,11 +77,16 @@ async function runTurn({ tab, question, host, onText = () => {}, onTool = () => 
     const screenBlock = ctx && ctx.text ? `<screen app="${ctx.app || ''}" window="${ctx.title || ''}">\n${ctx.text}\n</screen>` : `<screen app="${ctx?.app || ''}" window="${ctx?.title || ''}">(screen text not included — call read_screen if you need it)</screen>`;
     tab.messages.push({ role: 'user', content: `${screenBlock}\n${memoryBlock}\n\n${question}` });
     for (let iter = 0; iter < MAX_ITER; iter++) {
+      trimTranscript(tab);
       const res = await host.callLLM({ messages: tab.messages, tools: toolSchemas(), onText });
       if (res.usage) host.onUsage?.(res.usage);
-      const content = [];
-      if (res.text) content.push({ type: 'text', text: res.text });
-      for (const tu of res.toolUses || []) content.push({ type: 'tool_use', id: tu.id, name: tu.name, input: tu.input });
+      // Prefer the provider's verbatim content blocks (keeps thinking blocks
+      // + signatures intact for the next request); fall back to rebuilding.
+      let content = Array.isArray(res.content) && res.content.length ? res.content : [];
+      if (!content.length) {
+        if (res.text) content.push({ type: 'text', text: res.text });
+        for (const tu of res.toolUses || []) content.push({ type: 'tool_use', id: tu.id, name: tu.name, input: tu.input });
+      }
       tab.messages.push({ role: 'assistant', content });
       if (!res.toolUses || !res.toolUses.length || res.stopReason === 'end_turn') return { ok: true, text: res.text || '' };
       // execute tools — independent calls in parallel (original runs sequentially)
@@ -92,4 +122,4 @@ async function runTurn({ tab, question, host, onText = () => {}, onTool = () => 
     throw e;
   }
 }
-module.exports = { runTurn, toolSchemas, validateToolInput, SYSTEM_PROMPT, MAX_ITER, CAPS };
+module.exports = { runTurn, toolSchemas, validateToolInput, SYSTEM_PROMPT, MAX_ITER, CAPS, trimTranscript, MAX_TRANSCRIPT_MSGS };

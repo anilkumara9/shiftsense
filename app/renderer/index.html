@@ -46,6 +46,8 @@
       <input id="setKey" type="password" placeholder="paste key, then Save"></label>
     <label>Effort <select id="setEffort"><option value="low">low — fast sidebar answers</option><option value="medium">medium</option><option value="high">high — deeper answers</option></select></label>
     <label>Daily budget cap (USD, 0 = off) <input id="setBudget" type="number" min="0" step="0.5"></label>
+    <label>No-read apps <span class="dim">(comma separated — these apps' screens are never read)</span>
+      <input id="setDenylist" type="text"></label>
     <p class="dim" id="setPaths"></p>
     <div class="row"><button id="setOpenMemory">Open memory folder</button><button id="setClose">Close</button><button id="setSave" class="primary">Save</button></div>
   </div>

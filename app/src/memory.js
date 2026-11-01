@@ -110,7 +110,12 @@ class MemoryStore {
     const prev = existed ? fs.readFileSync(target, 'utf8') : '';
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const snapName = `${stamp}__${rel.replace(/[\\/]/g, '__')}`;
-    if (existed) fs.writeFileSync(path.join(this.versionsDir, snapName), prev);
+    if (existed) {
+      fs.writeFileSync(path.join(this.versionsDir, snapName), prev);
+      // cap undo history per file at 20 snapshots (audit minor: unbounded growth)
+      const mine = fs.readdirSync(this.versionsDir).filter(f => f.endsWith(`__${rel.replace(/[\\/]/g, '__')}`)).sort();
+      for (const old of mine.slice(0, Math.max(0, mine.length - 20))) { try { fs.unlinkSync(path.join(this.versionsDir, old)); } catch { /* ignore */ } }
+    }
     const next = mode === 'replace' ? String(content) : (prev + (prev && !prev.endsWith('\n') ? '\n' : '') + String(content));
     fs.writeFileSync(target, next);
     fs.appendFileSync(this.auditFile, JSON.stringify({ ts: new Date().toISOString(), rel, mode, source, bytes: Buffer.byteLength(String(content)), snapshot: existed ? snapName : null }) + '\n');

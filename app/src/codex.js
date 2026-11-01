@@ -42,6 +42,12 @@ function cleanEnv(env = process.env) {
   for (const k of Object.keys(out)) if (/(ANTHROPIC|OPENAI|GEMINI|GOOGLE)_API_KEY/.test(k) || /_TOKEN$/.test(k)) delete out[k];
   return out;
 }
+/** Windows npm installs of Codex are .cmd shims; Node refuses to spawn them
+ *  without a shell (EINVAL) — audit M10. Route those through the shell. */
+function spawnOptionsFor(codexPath, platform = process.platform) {
+  const needsShell = platform === 'win32' && /\.(cmd|bat)$/i.test(String(codexPath || ''));
+  return needsShell ? { shell: true } : {};
+}
 function parseCodexEvent(line) {
   try {
     const ev = JSON.parse(line);
@@ -90,7 +96,7 @@ class CodexHandoff {
     this.audit({ event: 'approved_and_started', id: approvalId, task: req.task });
     const args = buildExecArgs(req.task, this.dir);
     return await new Promise((resolve) => {
-      const child = this.spawnImpl(codexPath, args, { env: cleanEnv(), cwd: this.dir });
+      const child = this.spawnImpl(codexPath, args, { env: cleanEnv(), cwd: this.dir, ...spawnOptionsFor(codexPath) });
       let finalText = '', stderr = '', usage = null; const timer = setTimeout(() => { try { child.kill(); } catch {} }, TIMEOUT_MS);
       let buf = '';
       child.stdout?.on('data', d => { buf += d.toString(); const lines = buf.split('\n'); buf = lines.pop(); for (const l of lines) { if (!l.trim()) continue; const ev = parseCodexEvent(l); if (ev.kind === 'final') finalText = ev.text; if (ev.kind === 'usage') usage = ev.usage; if (ev.kind === 'progress') onProgress(ev.text); } });
@@ -101,7 +107,14 @@ class CodexHandoff {
     });
   }
   deny(approvalId, reason = 'denied by user') { const r = this.pending.get(approvalId); if (r) { this.pending.delete(approvalId); this.audit({ event: 'denied', id: approvalId, reason }); } return !!r; }
-  stop() { try { this._child?.kill(); } catch {} }
+  stop() {
+    const child = this._child; if (!child) return;
+    try {
+      if (process.platform === 'win32' && child.pid) { // kill the whole tree, not just the shim (audit minor)
+        require('child_process').execFile('taskkill', ['/PID', String(child.pid), '/T', '/F'], () => { try { child.kill(); } catch {} });
+      } else child.kill();
+    } catch { /* already gone */ }
+  }
   newTurn() { this.runsThisTurn = 0; }
 }
-module.exports = { CodexHandoff, buildExecArgs, cleanEnv, parseCodexEvent, candidatePaths, TIMEOUT_MS, MAX_PER_TURN };
+module.exports = { CodexHandoff, buildExecArgs, cleanEnv, parseCodexEvent, candidatePaths, spawnOptionsFor, TIMEOUT_MS, MAX_PER_TURN };
