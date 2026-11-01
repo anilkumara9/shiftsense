@@ -18,6 +18,21 @@ ShiftSense is built for quick questions while you work. Instead of switching to 
 
 It reads the screen through Windows UI Automation first, uses a screenshot only when the accessible text is not enough, and keeps your long term memory as plain markdown files that you can open, edit, back up, or delete at any time.
 
+## How it works
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/flow-diagram-dark.png">
+  <img alt="ShiftSense flow diagram: you double tap Shift, the sidebar sends your question to the agent core on your PC, the core reads the screen and your memory, and the provider you chose streams the answer back" src="docs/flow-diagram.png">
+</picture>
+
+1. **Ask from anywhere.** Double tap Shift in any app and the sidebar opens beside your work, without stealing focus.
+2. **It reads the app in front of you.** The screen reader uses Windows UI Automation to read the window as structured text. A screenshot is taken only when the text is not enough, and never more than one per question.
+3. **It remembers what matters.** Your markdown memory is searched for anything relevant, and what it finds is added to your question.
+4. **Your model answers.** The question goes to the provider you chose: Anthropic, OpenAI, or Ollama running locally on your PC. The answer streams into the sidebar.
+5. **Acting needs your approval.** If a task needs the computer itself, the Codex handoff waits for your approval first, every time.
+
+You can also open the diagram as a [standalone page](docs/flow-diagram.html) in any browser.
+
 ## Why ShiftSense
 
 **Because the answer should come to where you already are.** Normally, getting AI help with something on your screen means switching apps, taking a screenshot or copying text, pasting it into a chat tab, and explaining the background before you can even ask. ShiftSense removes all of that:
