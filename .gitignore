@@ -1,0 +1,12 @@
+node_modules/
+app/node_modules/
+app/dist/
+dist/
+*.log
+.env
+DShift/
+data/
+memory/
+history/
+.DS_Store
+recon/original/

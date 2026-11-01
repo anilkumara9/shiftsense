@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'">
+<title>D Shift</title><link rel="stylesheet" href="style.css"></head>
+<body>
+<div id="app">
+  <header id="titlebar">
+    <div class="brand">⇧⇧ <b>D Shift</b> <span id="ctxApp" class="dim"></span></div>
+    <div class="actions">
+      <button id="btnMemory" title="Memory (markdown files you own)">🧠</button>
+      <button id="btnSettings" title="Settings">⚙️</button>
+      <button id="btnHide" title="Hide (Esc)">✕</button>
+    </div>
+  </header>
+  <nav id="tabs"></nav>
+  <div id="usagebar" class="dim"></div>
+  <main id="transcript"></main>
+  <div id="queuebar"></div>
+  <footer>
+    <textarea id="input" rows="2" placeholder="Ask about your screen…  (Enter to send, Esc to close)"></textarea>
+    <div class="footrow">
+      <select id="modelSel" title="Model for this tab"></select>
+      <span id="hint" class="dim">double-tap ⇧ to toggle</span>
+      <button id="btnStop" class="hidden">Stop</button>
+      <button id="btnSend">Send ↑</button>
+    </div>
+  </footer>
+</div>
+
+<div id="approval" class="modal hidden">
+  <div class="card">
+    <h3>🤖 Codex computer task — approve?</h3>
+    <p class="dim">D Shift wants to hand this task to Codex. It runs read-only, in the background, and only if you allow this one task. Approvals are never remembered.</p>
+    <pre id="approvalTask"></pre>
+    <div id="approvalProgress" class="dim"></div>
+    <div class="row"><button id="apprDeny">Deny</button><button id="apprAllow" class="primary">Allow this task</button></div>
+  </div>
+</div>
+
+<div id="settings" class="modal hidden">
+  <div class="card">
+    <h3>Settings</h3>
+    <label>Provider
+      <select id="setProvider"><option value="anthropic">Anthropic (Claude)</option><option value="openai">OpenAI</option><option value="ollama">Ollama — local, free</option></select></label>
+    <label>API key <span class="dim">(stored encrypted with Windows DPAPI, never in plain text)</span>
+      <input id="setKey" type="password" placeholder="paste key, then Save"></label>
+    <label>Effort <select id="setEffort"><option value="low">low — fast sidebar answers</option><option value="medium">medium</option><option value="high">high — deeper answers</option></select></label>
+    <label>Daily budget cap (USD, 0 = off) <input id="setBudget" type="number" min="0" step="0.5"></label>
+    <p class="dim" id="setPaths"></p>
+    <div class="row"><button id="setOpenMemory">Open memory folder</button><button id="setClose">Close</button><button id="setSave" class="primary">Save</button></div>
+  </div>
+</div>
+
+<div id="memoryDrawer" class="modal hidden">
+  <div class="card wide">
+    <h3>Memory — plain markdown, yours to edit</h3>
+    <div class="memwrap"><ul id="memFiles"></ul>
+      <div class="memedit"><textarea id="memText" rows="16"></textarea>
+      <div class="row"><button id="memUndo">Undo last model write</button><button id="memSave" class="primary">Save file</button></div>
+      <div id="memAudit" class="dim"></div></div>
+    </div>
+    <div class="row"><button id="memOpenFolder">Open folder</button><button id="memClose">Close</button></div>
+  </div>
+</div>
+<script src="renderer.js"></script>
+</body></html>
