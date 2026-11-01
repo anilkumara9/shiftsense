@@ -18,6 +18,28 @@ ShiftSense is built for quick questions while you work. Instead of switching to 
 
 It reads the screen through Windows UI Automation first, uses a screenshot only when the accessible text is not enough, and keeps your long-term memory as plain markdown files that you can open, edit, back up, or delete at any time.
 
+## Why ShiftSense
+
+**Because the answer should come to where you already are.** Normally, getting AI help with something on your screen means switching apps, taking a screenshot or copying text, pasting it into a chat tab, and explaining the background before you can even ask. ShiftSense removes all of that:
+
+- **No re-explaining.** It already sees the window you are asking about and knows your context from your memory files, so you can ask the way you would ask a person sitting next to you.
+- **No copy and paste.** Errors, emails, documents, dashboards: ask about them in place, in any app, without moving content around.
+- **It remembers you.** Your memory lives in plain markdown files on your PC and your chats persist between sessions, so answers stay personal instead of starting from zero every time.
+- **Your model, your cost.** Use Claude, OpenAI, or a free local model through Ollama. You see token and cost stats per chat, and a daily budget cap protects you from surprises. There is no ShiftSense subscription.
+- **Private by design.** Memory and history never leave your machine. Password fields are never read, sensitive apps can be blocked from reading entirely, and with Ollama nothing leaves your PC at all.
+- **Help that acts, with your permission.** When a task needs the computer itself, ShiftSense asks first, every time. Approvals expire in 2 minutes and there is no always-allow switch.
+- **Free and open source.** Download it, inspect it, keep it forever.
+
+## Where it helps
+
+- **When something breaks:** an error dialog, a failed build, a cryptic stack trace. Ask "what is this and how do I fix it" without leaving the app that failed.
+- **In your inbox:** summarize a long thread, draft a reply to the email on screen, or pull out the action items.
+- **While you study or research:** explain the paragraph, table, or chart in front of you, in plain words, with your project context remembered.
+- **In documents and spreadsheets:** compare the options visible in a window, extract the key points of a long document, or check what a report is really saying.
+- **At work:** meeting notes, dashboards, forms, and admin panels. Ask what matters on the page instead of reading every field.
+- **While you write:** tighten a draft, change its tone, or continue it, using the text already on your screen.
+- **For anything you ask twice:** if you find yourself retyping the same background into a chat window every day, that background belongs in your memory file, where ShiftSense keeps it for you.
+
 ## Features
 
 ### Sidebar experience
