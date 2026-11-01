@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.5.0 — Scale-and-release pass (2026-11-01)
+
+Everything re-verified end to end, the repo restructured into a standard product layout, and the first GitHub Release (Windows installer built by CI on a real Windows runner).
+
+- **Repository layout flattened** — the app no longer hides inside an `app/` subfolder; `src/`, `native/`, `renderer/`, `tests/`, `scripts/`, `docs/` sit at the root.
+- **Full product scaffolding** — LICENSE, `.env.example` (the documented key-resolution order), issue/PR templates, CONTRIBUTING, SECURITY, CODE_OF_CONDUCT, `docs/` (architecture, memory, tools), and GitHub Actions: CI on Windows **and** Linux, plus a tag-triggered release workflow that tests, preflights, builds the installer, and publishes it.
+- **Cross-platform developer scripts** — `npm run check`, `npm test`, and `npm run shot` previously relied on POSIX shell behaviour (a `for` loop, glob expansion, env prefixes) that cannot run under cmd.exe — on the very platform this app ships on. All three now run through Node launchers that behave identically everywhere.
+- **Persistence performance fix** — every chat save was re-reading, re-parsing and re-writing the entire previous payload just to rotate the backup (~4 full writes + 2 parses per save). Rotation is now a verified rename when the store knows its last-written payload, and the mirror no longer keeps a backup of itself. One save at a full 50-tab / 1.4 MB state: **12 ms**.
+- **Heavy-load stress suite** (`npm run stress`) — 50 tabs × 40 messages, 1,000 memory files with ranked search and a 1,000-entry audit-chain verification, a 9,330-node accessibility tree serialized under the caps, 10,000 ledger operations with exact totals, 1,000 reserve/settle cycles, 100 serialized approvals: all within budget.
+- Symlink security tests now skip cleanly where symlink creation needs elevation (Windows without Developer Mode) instead of failing.
+
 ## 1.4.0 — Team build (2026-11-01)
 
 Six specialist engineering lanes, integrated and fully re-verified (99/99 tests):
