@@ -8,16 +8,16 @@ This project started as a full reverse-engineering of [Kylejeong2/d-shift](https
 
 | Requirement | Implementation |
 |---|---|
-| Double-tap Shift anywhere to open | Low-level global key hook (`uiohook-napi`) feeding a hardened detector (tap <250 ms, two taps <400 ms, typing capitals / held Shift / other modifiers never trigger) — `app/src/doubleShift.js`. Fallback shortcut Ctrl+Shift+Space always on. |
-| Floats over other apps, doesn't steal focus | Frameless transparent always-on-top window, shown with `showInactive()`; it's non-focusable in peek mode and only takes key focus when you click in to type — `app/main.js` |
+| Double-tap Shift anywhere to open | Low-level global key hook (`uiohook-napi`) feeding a hardened detector (tap <250 ms, two taps <400 ms, typing capitals / held Shift / other modifiers never trigger) — `src/doubleShift.js`. Fallback shortcut Ctrl+Shift+Space always on. |
+| Floats over other apps, doesn't steal focus | Frameless transparent always-on-top window, shown with `showInactive()`; it's non-focusable in peek mode and only takes key focus when you click in to type — `main.js` |
 | Translucent, lightweight | Acrylic-style backdrop blur, one small window, no bundled model, no database |
 | Esc closes | Global Esc registration while visible; closing the last tab also hides it |
-| Answers from your screen, accessibility first | Windows **UI Automation** tree of the foreground window via `app/native/uia-dump.ps1` (3,000 nodes / 60k chars caps, focused element marked, selected text included). Screenshot only when the tree is thin/missing or the model asks — max 1 per question |
+| Answers from your screen, accessibility first | Windows **UI Automation** tree of the foreground window via `native/uia-dump.ps1` (3,000 nodes / 60k chars caps, focused element marked, selected text included). Screenshot only when the tree is thin/missing or the model asks — max 1 per question |
 | Local memory in plain markdown, easy to open/edit | `~/DShift/memory/` — `me.md`, `notes.md`, `people/`, `projects/` — plus an in-app editor, a tray "Open Memory Folder" item, and Settings showing the exact path |
 | Multiple chat tabs | Ctrl+T / + button, Ctrl+W closes; **tabs, messages and usage persist across restarts** |
 | Token & cost stats | Per-tab bar: context %, input/output tokens, cache hit rate, estimated $ cost, screen reads, screenshots |
 | Menu-bar app for settings | On Windows that's the **system tray** app: Show/Hide, New Tab, Open Memory Folder, Change API Key, provider switch, Quit |
-| Codex computer-use handoff, approval only | Per-task approval card, 2-minute expiry, **no "always allow" mode**, read-only sandbox, full audit log — `app/src/codex.js` |
+| Codex computer-use handoff, approval only | Per-task approval card, 2-minute expiry, **no "always allow" mode**, read-only sandbox, full audit log — `src/codex.js` |
 
 > One honest boundary: Codex *Computer Use* itself lives in the ChatGPT desktop app, not the CLI (see recon/DOCS_RESEARCH.md §3.4). D Shift hands approved tasks to the real `codex exec` agent; it does not fake a Computer Use integration.
 
@@ -32,7 +32,6 @@ See [`BEAT_SHEET.md`](BEAT_SHEET.md) — 15 concrete wins, each tied to a weakne
 ## Run it (Windows)
 
 ```powershell
-cd app
 npm install
 npm start
 ```
@@ -44,7 +43,7 @@ npm start
 ### Build the installer
 
 ```powershell
-npm run dist:win          # NSIS installer into app/dist/
+npm run dist:win          # NSIS installer into dist/
 npm run dist:win:portable # single portable .exe
 ```
 
@@ -84,16 +83,30 @@ npm run check
 
 Verified here: all syntax checks pass, **99/99 tests pass**, preflight passes, the Electron app boots and seeds its data folder, and a Linux package assembly was inspected (whitelist-exact contents, packaged binary boots). Still honestly unverified without a physical Windows machine: the UIA walk against real apps, the native double-Shift hook, focus behaviour, and the actual NSIS build — the Day-1 checklist is in `recon/DOCS_RESEARCH.md` §6. Known remaining limitations: provider calls don't honour HTTP proxy env vars, and the installer is unsigned until a code-signing certificate exists.
 
-## Layout
+## Repository layout
 
 ```
-app/
-├── main.js            window, tray, global hook, IPC, key store
-├── preload.js         sandboxed bridge (contextIsolation, no node in renderer)
-├── renderer/          sidebar UI: tabs, transcript, usage bar, settings, memory editor, approval card
-├── src/               pure, tested core: doubleShift · contextEngine · memory ·
-│                      chatStore · usage · agent · llm · codex · shellPolicy · settings
-├── native/uia-dump.ps1  Windows UI Automation reader
-└── tests/
-recon/                 RECON_REPORT.md (84 KB, file-by-file) · DOCS_RESEARCH.md · original/
+├── main.js              Electron main: window, tray, global double-Shift hook, IPC, DPAPI key store
+├── preload.js           sandboxed bridge (contextIsolation, no Node in the renderer)
+├── src/                 the tested core (14 modules)
+│   ├── doubleShift.js     hardened double-tap detector (state machine)
+│   ├── contextEngine.js   UIA tree serializer: caps, password redaction, denylist, tree diffing
+│   ├── uiaClient.js       persistent UIA host client (warm PowerShell, restart, timeout)
+│   ├── memory.js          markdown memory: ranked search, write audit (hash-chained), undo
+│   ├── chatStore.js       tabs: display/API transcript split, archive, atomic + backup + mirror saves
+│   ├── usage.js · spend.js  token/cache/cost stats · race-safe daily budget ledger
+│   ├── agent.js           tool loop: caps, parallel tools, rollback, per-turn wall-clock budget
+│   ├── llm.js             Anthropic + OpenAI streaming: prompt caching, retry, stall watchdog
+│   ├── codex.js           approval-gated Codex handoff (audit-chained, env-scrubbed)
+│   ├── approvalQueue.js   serialized approvals — every request resolves, none can deadlock
+│   ├── settings.js        validated settings + .env discovery
+│   └── shellPolicy.js     read-only shell allowlist (defence in depth)
+├── native/              uia-host.ps1 (persistent reader) · uia-dump.ps1 (one-shot fallback)
+├── renderer/            the sidebar UI — a faithful port of the original's interface (see recon/UI_SPEC.md)
+├── tests/               99 tests: unit, both audit regression suites, security, reliability,
+│                        AI engine, UIA protocol, and the end-to-end chaos suite
+├── scripts/             preflight.js (build gate) · make-icon.js (icon generator)
+├── build/               generated app icons (icon.png / icon.ico)
+└── recon/               RECON_REPORT.md (file-by-file teardown of the original) · DOCS_RESEARCH.md
+                         UI_SPEC.md · AUDIT_V1.md · UI_PARITY_SHOT.png
 ```
