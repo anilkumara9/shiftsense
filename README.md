@@ -93,6 +93,17 @@ It reads the screen through Windows UI Automation first, uses a screenshot only 
 
 > The installer is not code-signed yet. If Windows SmartScreen appears, confirm that you downloaded the file from the official GitHub release page, then choose **More info → Run anyway** if you trust the source.
 
+#### Verify your download (recommended)
+
+Every release includes a `SHA256SUMS.txt` file next to the installer. Download it into the same folder, then run:
+
+```powershell
+(Get-FileHash .\D-Shift-Setup-1.5.0-x64.exe -Algorithm SHA256).Hash
+Get-Content .\SHA256SUMS.txt
+```
+
+The two hashes must match exactly. If they do not, delete the installer and download it again from the official release page.
+
 ### Option 2: Run from source
 
 Use this option for development or if you want to inspect and modify the code before running it.

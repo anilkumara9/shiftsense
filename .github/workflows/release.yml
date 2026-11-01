@@ -31,6 +31,14 @@ jobs:
         run: |
           npm run preflight
           npx electron-builder --win nsis --publish never
+      - name: Generate SHA256SUMS.txt
+        # The installer is unsigned, so every release ships a checksum file
+        # users can verify their download against (README + release notes
+        # document the PowerShell check).
+        shell: pwsh
+        run: |
+          Get-ChildItem dist/*.exe | ForEach-Object { "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)" } | Out-File -Encoding ascii dist/SHA256SUMS.txt
+          Get-Content dist/SHA256SUMS.txt
       - name: Extract release notes from CHANGELOG.md
         shell: pwsh
         run: |
@@ -39,6 +47,6 @@ jobs:
           if ($text -match "(?s)## $([regex]::Escape($version)).*?\n(.*?)(?=\n## |\z)") { $Matches[1].Trim() | Out-File -Encoding utf8 notes.md } else { "Release ${{ github.ref_name }}" | Out-File -Encoding utf8 notes.md }
       - name: Publish GitHub release
         shell: pwsh
-        run: gh release create "${{ github.ref_name }}" dist/*.exe --title "ShiftSense ${{ github.ref_name }}" --notes-file notes.md
+        run: gh release create "${{ github.ref_name }}" dist/*.exe dist/SHA256SUMS.txt --title "ShiftSense ${{ github.ref_name }}" --notes-file notes.md
         env:
           GH_TOKEN: ${{ github.token }}
